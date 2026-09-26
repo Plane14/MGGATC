@@ -10,6 +10,8 @@
 
 #include "libworld.h"
 #include "worldHelper.hpp"
+#include "aircraftPerformanceProfileService.hpp"
+#include "aircraftPerformanceModel.hpp"
 #include "basicManeuverTypes.hpp"
 #include "maneuverFactory.hpp"
 #include "intentTypes.hpp"
@@ -106,9 +108,10 @@ namespace ai
 
         void setOnFinal(const Runway::End& runwayEnd) override
         {
-            float minutesToThreshold = 4.0f;
-            float descentSpeedFpm = 1000.0f;
-            float groundSpeedKt = 145.0f;
+            const auto& profile = host()->services().get<AircraftPerformanceProfileService>()->resolve(modelIcao());
+            float minutesToThreshold = (float)performance_model::calcFinalApproachMinutes(profile);
+            float descentSpeedFpm = (float)max(500, profile.approachRodFpm);
+            float groundSpeedKt = (float)performance_model::calcFinalApproachGroundSpeedKt(profile);
 
             setAltitude(Altitude::msl(
                 runwayEnd.elevationFeet() +                // runway elevation

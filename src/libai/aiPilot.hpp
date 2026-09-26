@@ -14,6 +14,8 @@
 #include "intentTypes.hpp"
 #include "intentFactory.hpp"
 #include "aiAircraft.hpp"
+#include "aircraftPerformanceModel.hpp"
+#include "aircraftPerformanceProfileService.hpp"
 #include "libai.hpp"
 
 using namespace std;
@@ -89,6 +91,11 @@ namespace ai
             return "<twrkhz=" + to_string(m_departureTowerKhz) + ">";
         }
     private:
+        const AircraftPerformanceProfileService::Profile& performanceProfile() const
+        {
+            return host()->services().get<AircraftPerformanceProfileService>()->resolve(m_aircraft->modelIcao());
+        }
+
         void handleCommTransmission(shared_ptr<Intent> intent)
         {
             if (intent->direction() == Intent::Direction::ControllerToPilot && intent->subjectFlight() == flight())
@@ -308,6 +315,12 @@ namespace ai
 
         shared_ptr<Maneuver> maneuverLanding()
         {
+            const auto& profile = performanceProfile();
+            int preFlareSinkRate = performance_model::calcPreFlareSinkRateFpm(profile);
+            int touchdownSpeedKt = performance_model::calcTouchdownSpeedKt(profile);
+            int rolloutExitSpeedKt = performance_model::calcRolloutExitSpeedKt(profile);
+            auto landingRollDuration = performance_model::calcLandingRollDuration(profile);
+
             auto preFlare = M.parallel(Maneuver::Type::ArrivalLanding, "pre_flare", {
                 shared_ptr<Maneuver>(new AnimationManeuver<double>(
                     "", 
@@ -323,8 +336,8 @@ namespace ai
                 )),
                 shared_ptr<Maneuver>(new AnimationManeuver<double>(
                     "", 
-                    -1000,
-                    -500,
+                    -profile.approachRodFpm,
+                    -preFlareSinkRate,
                     chrono::milliseconds(3500),
                     [](const double& from, const double& to, double progress, double& value) {
                         value = from + (to - from) * progress; 
@@ -349,8 +362,8 @@ namespace ai
                 )),
                 shared_ptr<Maneuver>(new AnimationManeuver<double>(
                     "gndspd",
-                    145,
-                    135,
+                    performance_model::calcFinalApproachGroundSpeedKt(profile),
+                    touchdownSpeedKt,
                     chrono::seconds(3),
                     [](const double& from, const double& to, double progress, double& value) {
                         value = from + (to - from) * progress;
@@ -362,7 +375,7 @@ namespace ai
                 M.sequence(Maneuver::Type::Unspecified, "", {
                     shared_ptr<Maneuver>(new AnimationManeuver<double>(
                         "verspd_1",
-                        -500,
+                        -preFlareSinkRate,
                         -50,
                         chrono::seconds(2),
                         [](const double &from, const double &to, double progress, double &value) {
@@ -423,9 +436,9 @@ namespace ai
                 )),
                 shared_ptr<Maneuver>(new AnimationManeuver<double>(
                     "gndspd",
-                    135,
-                    30,
-                    chrono::seconds(20),
+                    touchdownSpeedKt,
+                    rolloutExitSpeedKt,
+                    landingRollDuration,
                     [](const double& from, const double& to, double progress, double& value) {
                         value = from + (to - from) * progress; 
                     },
@@ -940,11 +953,23 @@ namespace ai
         shared_ptr<Maneuver> maneuverTakeoff()
         {
             return DeferredManeuver::create(Maneuver::Type::DepartureTakeOffRoll, "takeoff", [=]() {
+                const auto& profile = performanceProfile();
                 auto clearance = flight()->findClearanceOrThrow<TakeoffClearance>(Clearance::Type::TakeoffClearance);
                 auto luaw = flight()->tryFindClearance<LineUpAndWaitApproval>(Clearance::Type::LineUpAndWait);
                 auto runway = m_departureAirport->getRunwayOrThrow(clearance->departureRunway());
                 const auto& runwayEnd = runway->getEndOrThrow(clearance->departureRunway());
                 float runwayHeading = runwayEnd.heading();
+                double takeoffRollStartSpeedKt = m_stoppedBeforeTakeoff ? 0.0 : 20.0;
+                double takeoffRollEndSpeedKt = max((double)profile.takeOffV2Kt, takeoffRollStartSpeedKt + 20.0);
+                double airborneAccelerationTargetKt = max((double)profile.climb150IASKt, takeoffRollEndSpeedKt + 10.0);
+                double postTakeoffTargetKt = max((double)profile.climb240IASKt, airborneAccelerationTargetKt);
+                auto takeoffRollDuration = performance_model::calcTakeoffRollDuration(profile, takeoffRollStartSpeedKt);
+                auto liftOffDuration = performance_model::calcLiftOffDuration(profile);
+                auto airborneAccelerationDuration = performance_model::calcAirborneAccelerationDuration(profile);
+                auto postTakeoffTransitionDuration = performance_model::calcPostTakeoffTransitionDuration(profile);
+                auto rotationStartDelay = chrono::milliseconds(max<int64_t>(
+                    0,
+                    takeoffRollDuration.count() - chrono::seconds(9).count()));
 
                 auto beforeTakeoffChecklist = M.await(Maneuver::Type::Unspecified, "bfr_tkoff_chklst", [=]() {
                     auto now = host()->getWorld()->timestamp();
@@ -969,12 +994,12 @@ namespace ai
                         m_aircraft->location().longitude,
                         m_stoppedBeforeTakeoff ? 1 : 0);
                 });
-                auto rollOnRunway = M.deferred([this]() {
+                auto rollOnRunway = M.deferred([this, takeoffRollStartSpeedKt, takeoffRollEndSpeedKt, takeoffRollDuration]() {
                     return shared_ptr<Maneuver>(new AnimationManeuver<double>(
                         "roll",
-                        m_stoppedBeforeTakeoff ? 0.0f : 20.0f,
-                        140.0,
-                        chrono::seconds(20),
+                        takeoffRollStartSpeedKt,
+                        takeoffRollEndSpeedKt,
+                        takeoffRollDuration,
                         [](const double &from, const double &to, double progress, double &value) {
                             value = from + (to - from) * progress;
                         },
@@ -1019,8 +1044,8 @@ namespace ai
                 auto liftUp = shared_ptr<Maneuver>(new AnimationManeuver<double>(
                     "lift_up",
                     0,
-                    2500.0,
-                    chrono::seconds(10),
+                    max(500, profile.initialClimbRocFpm),
+                    liftOffDuration,
                     [](const double& from, const double& to, double progress, double& value) {
                         value = from + (to - from) * progress; 
                     },
@@ -1043,9 +1068,9 @@ namespace ai
                 ));
                 auto accelerateAirborne = shared_ptr<Maneuver>(new AnimationManeuver<double>(
                     "accel_airb",
-                    140.0,
-                    180.0,
-                    chrono::seconds(30),
+                    takeoffRollEndSpeedKt,
+                    airborneAccelerationTargetKt,
+                    airborneAccelerationDuration,
                     [](const double& from, const double& to, double progress, double& value) {
                         value = from + (to - from) * progress; 
                     },
@@ -1055,9 +1080,9 @@ namespace ai
                 ));
                 auto turnToInitialHeading = shared_ptr<Maneuver>(new AnimationManeuver<double>(
                     "turn_init_hdg",
-                    140.0,
-                    210.0,
-                    chrono::seconds(30),
+                    airborneAccelerationTargetKt,
+                    postTakeoffTargetKt,
+                    postTakeoffTransitionDuration,
                     [](const double& from, const double& to, double progress, double& value) {
                         value = from + (to - from) * progress; 
                     },
@@ -1079,21 +1104,23 @@ namespace ai
                             accelerateAirborne,
                         }),
                         M.sequence(Maneuver::Type::Unspecified, "", {
-                            M.delay(chrono::seconds(20)),
+                            M.delay(rotationStartDelay),
                             rotate1,
                             rotate2,
                         }),
                         M.sequence(Maneuver::Type::Unspecified, "", {
-                            M.delay(chrono::seconds(23)),
+                            M.delay(chrono::milliseconds(rotationStartDelay.count() + chrono::seconds(3).count())),
                             logLiftUp,
                             liftUp
                         }),
                         M.sequence(Maneuver::Type::Unspecified, "", {
-                            M.delay(chrono::seconds(25)),
+                            M.delay(chrono::milliseconds(rotationStartDelay.count() + chrono::seconds(5).count())),
                             gearUp,
                         }),
                         M.sequence(Maneuver::Type::Unspecified, "", {
-                            M.delay(chrono::seconds(32)),
+                            M.delay(chrono::milliseconds(
+                                takeoffRollDuration.count() +
+                                max<int64_t>(5000, airborneAccelerationDuration.count() / 3))),
                             M.airborneTurn(flight(), runwayHeading, clearance->initialHeading()),
                         }),
                     })
@@ -1138,4 +1165,3 @@ namespace ai
         }
     };
 }
-

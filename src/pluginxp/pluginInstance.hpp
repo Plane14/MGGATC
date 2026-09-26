@@ -41,6 +41,7 @@
 #include "userAircraft.hpp"
 #include "userPilot.hpp"
 #include "transcriptInterface.hpp"
+#include "aircraftPerformanceProfileService.hpp"
 
 using namespace std;
 using namespace PPL;
@@ -633,6 +634,7 @@ private:
         auto aircraftObjectService = shared_ptr<Xpmp2AircraftObjectService>(new Xpmp2AircraftObjectService(hostServices));
         auto intentFactory = shared_ptr<IntentFactory>(new IntentFactory(hostServices));
         auto transcriptInterface = shared_ptr<TranscriptInterface>(new MenuBasedTranscriptInterface(hostServices));
+        auto aircraftPerformanceProfiles = shared_ptr<AircraftPerformanceProfileService>(new AircraftPerformanceProfileService(hostServices));
 
         hostServices->services().use<PluginConfiguration>(configuration);
         hostServices->services().use<AircraftObjectService>(aircraftObjectService);
@@ -640,6 +642,7 @@ private:
         hostServices->services().use<IntentFactory>(intentFactory);
         hostServices->services().use<PhraseologyService>(phraseologyService);
         hostServices->services().use<TranscriptInterface>(transcriptInterface);
+        hostServices->services().use<AircraftPerformanceProfileService>(aircraftPerformanceProfiles);
 
 #if IBM
         auto serverController = server::ServerControllerInterface::create(hostServices);

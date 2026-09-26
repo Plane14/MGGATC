@@ -35,6 +35,7 @@
 // tnc
 #include "libworld.h"
 #include "airlineReferenceTable.hpp"
+#include "aircraftPerformanceProfileService.hpp"
 #include "runtimeScheduleSupport.hpp"
 
 using namespace std;
@@ -471,7 +472,7 @@ private:
             aircraftOption.modelIcao,
             effectiveAirlineIcao,
             effectiveTailNo,
-            world::Aircraft::Category::Jet);
+            m_host->services().get<AircraftPerformanceProfileService>()->resolve(aircraftOption.modelIcao).category);
         flight->setAircraft(aircraft);
 
         auto pilot = m_host->createAIPilot(flight);
@@ -530,7 +531,7 @@ private:
             aircraftOption.modelIcao,
             effectiveAirlineIcao,
             effectiveTailNo,
-            world::Aircraft::Category::Jet);
+            m_host->services().get<AircraftPerformanceProfileService>()->resolve(aircraftOption.modelIcao).category);
         flight->setAircraft(aircraft);
 
         auto pilot = m_host->createAIPilot(flight);

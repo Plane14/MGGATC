@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.0.0)
 project(libai VERSION 0.1.0)
 
 add_library(libai STATIC 
+    aircraftPerformanceModel.hpp
     libai.hpp
     libai.cpp
     resourceAllocator.hpp
