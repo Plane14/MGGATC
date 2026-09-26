@@ -128,6 +128,39 @@ namespace world
             return !result.empty();
         }
 
+        void applyPerformanceValues(
+            AircraftPerformanceProfileService::Profile& profile,
+            const unordered_map<string, string>& values)
+        {
+            int intValue;
+            double doubleValue;
+
+            if (tryParseInt(values, "takeOffV2", intValue)) profile.takeOffV2Kt = intValue;
+            if (tryParseInt(values, "takeOffDistance", intValue)) profile.takeOffDistanceMeters = intValue;
+            if (tryParseInt(values, "takeOffMTOW", intValue)) profile.takeOffMtowKg = intValue;
+            if (tryParseInt(values, "initialClimbIAS", intValue)) profile.initialClimbIASKt = intValue;
+            if (tryParseInt(values, "initialClimbROC", intValue)) profile.initialClimbRocFpm = intValue;
+            if (tryParseInt(values, "climb150IAS", intValue)) profile.climb150IASKt = intValue;
+            if (tryParseInt(values, "climb150ROC", intValue)) profile.climb150RocFpm = intValue;
+            if (tryParseInt(values, "climb240IAS", intValue)) profile.climb240IASKt = intValue;
+            if (tryParseInt(values, "climb240ROC", intValue)) profile.climb240RocFpm = intValue;
+            if (tryParseDouble(values, "machClimbMACH", doubleValue)) profile.machClimbMach = doubleValue;
+            if (tryParseInt(values, "machClimbROC", intValue)) profile.machClimbRocFpm = intValue;
+            if (tryParseInt(values, "cruiseTAS", intValue)) profile.cruiseTasKt = intValue;
+            if (tryParseDouble(values, "cruiseMACH", doubleValue)) profile.cruiseMach = doubleValue;
+            if (tryParseInt(values, "cruiseCeiling", intValue)) profile.cruiseCeilingFl = intValue;
+            if (tryParseInt(values, "cruiseRange", intValue)) profile.cruiseRangeNm = intValue;
+            if (tryParseDouble(values, "initialDescentMACH", doubleValue)) profile.initialDescentMach = doubleValue;
+            if (tryParseInt(values, "initialDescentROD", intValue)) profile.initialDescentRodFpm = intValue;
+            if (tryParseInt(values, "descentIAS", intValue)) profile.descentIASKt = intValue;
+            if (tryParseInt(values, "descentROD", intValue)) profile.descentRodFpm = intValue;
+            if (tryParseInt(values, "approachIAS", intValue)) profile.approachIASKt = intValue;
+            if (tryParseInt(values, "approachROD", intValue)) profile.approachRodFpm = intValue;
+            if (tryParseInt(values, "approachMCS", intValue)) profile.approachMcsKt = intValue;
+            if (tryParseInt(values, "landingVat", intValue)) profile.landingVatKt = intValue;
+            if (tryParseInt(values, "landingDistance", intValue)) profile.landingDistanceMeters = intValue;
+        }
+
         unordered_map<string, RawPerformanceRow> parsePerformanceRows(istream& stream)
         {
             unordered_map<string, RawPerformanceRow> rowsByIcao;
@@ -404,8 +437,6 @@ namespace world
             profile.hasPerformanceData = true;
 
             string stringValue;
-            int intValue;
-            double doubleValue;
 
             if (tryParseString(perfRow->values, "takeOffWTC", stringValue))
             {
@@ -420,58 +451,9 @@ namespace world
                 profile.landingApc = upper(stringValue);
             }
 
-            if (tryParseInt(perfRow->values, "takeOffV2", intValue)) profile.takeOffV2Kt = intValue;
-            if (tryParseInt(perfRow->values, "takeOffDistance", intValue)) profile.takeOffDistanceMeters = intValue;
-            if (tryParseInt(perfRow->values, "takeOffMTOW", intValue)) profile.takeOffMtowKg = intValue;
-            if (tryParseInt(perfRow->values, "initialClimbIAS", intValue)) profile.initialClimbIASKt = intValue;
-            if (tryParseInt(perfRow->values, "initialClimbROC", intValue)) profile.initialClimbRocFpm = intValue;
-            if (tryParseInt(perfRow->values, "climb150IAS", intValue)) profile.climb150IASKt = intValue;
-            if (tryParseInt(perfRow->values, "climb150ROC", intValue)) profile.climb150RocFpm = intValue;
-            if (tryParseInt(perfRow->values, "climb240IAS", intValue)) profile.climb240IASKt = intValue;
-            if (tryParseInt(perfRow->values, "climb240ROC", intValue)) profile.climb240RocFpm = intValue;
-            if (tryParseDouble(perfRow->values, "machClimbMACH", doubleValue)) profile.machClimbMach = doubleValue;
-            if (tryParseInt(perfRow->values, "machClimbROC", intValue)) profile.machClimbRocFpm = intValue;
-            if (tryParseInt(perfRow->values, "cruiseTAS", intValue)) profile.cruiseTasKt = intValue;
-            if (tryParseDouble(perfRow->values, "cruiseMACH", doubleValue)) profile.cruiseMach = doubleValue;
-            if (tryParseInt(perfRow->values, "cruiseCeiling", intValue)) profile.cruiseCeilingFl = intValue;
-            if (tryParseInt(perfRow->values, "cruiseRange", intValue)) profile.cruiseRangeNm = intValue;
-            if (tryParseDouble(perfRow->values, "initialDescentMACH", doubleValue)) profile.initialDescentMach = doubleValue;
-            if (tryParseInt(perfRow->values, "initialDescentROD", intValue)) profile.initialDescentRodFpm = intValue;
-            if (tryParseInt(perfRow->values, "descentIAS", intValue)) profile.descentIASKt = intValue;
-            if (tryParseInt(perfRow->values, "descentROD", intValue)) profile.descentRodFpm = intValue;
-            if (tryParseInt(perfRow->values, "approachIAS", intValue)) profile.approachIASKt = intValue;
-            if (tryParseInt(perfRow->values, "approachROD", intValue)) profile.approachRodFpm = intValue;
-            if (tryParseInt(perfRow->values, "approachMCS", intValue)) profile.approachMcsKt = intValue;
-            if (tryParseInt(perfRow->values, "landingVat", intValue)) profile.landingVatKt = intValue;
-            if (tryParseInt(perfRow->values, "landingDistance", intValue)) profile.landingDistanceMeters = intValue;
-
             profile.category = deriveCategory(profile.doc8643Class, profile.wakeTurbulenceCategory);
             applyCategoryDefaults(profile);
-
-            if (tryParseInt(perfRow->values, "takeOffV2", intValue)) profile.takeOffV2Kt = intValue;
-            if (tryParseInt(perfRow->values, "takeOffDistance", intValue)) profile.takeOffDistanceMeters = intValue;
-            if (tryParseInt(perfRow->values, "takeOffMTOW", intValue)) profile.takeOffMtowKg = intValue;
-            if (tryParseInt(perfRow->values, "initialClimbIAS", intValue)) profile.initialClimbIASKt = intValue;
-            if (tryParseInt(perfRow->values, "initialClimbROC", intValue)) profile.initialClimbRocFpm = intValue;
-            if (tryParseInt(perfRow->values, "climb150IAS", intValue)) profile.climb150IASKt = intValue;
-            if (tryParseInt(perfRow->values, "climb150ROC", intValue)) profile.climb150RocFpm = intValue;
-            if (tryParseInt(perfRow->values, "climb240IAS", intValue)) profile.climb240IASKt = intValue;
-            if (tryParseInt(perfRow->values, "climb240ROC", intValue)) profile.climb240RocFpm = intValue;
-            if (tryParseDouble(perfRow->values, "machClimbMACH", doubleValue)) profile.machClimbMach = doubleValue;
-            if (tryParseInt(perfRow->values, "machClimbROC", intValue)) profile.machClimbRocFpm = intValue;
-            if (tryParseInt(perfRow->values, "cruiseTAS", intValue)) profile.cruiseTasKt = intValue;
-            if (tryParseDouble(perfRow->values, "cruiseMACH", doubleValue)) profile.cruiseMach = doubleValue;
-            if (tryParseInt(perfRow->values, "cruiseCeiling", intValue)) profile.cruiseCeilingFl = intValue;
-            if (tryParseInt(perfRow->values, "cruiseRange", intValue)) profile.cruiseRangeNm = intValue;
-            if (tryParseDouble(perfRow->values, "initialDescentMACH", doubleValue)) profile.initialDescentMach = doubleValue;
-            if (tryParseInt(perfRow->values, "initialDescentROD", intValue)) profile.initialDescentRodFpm = intValue;
-            if (tryParseInt(perfRow->values, "descentIAS", intValue)) profile.descentIASKt = intValue;
-            if (tryParseInt(perfRow->values, "descentROD", intValue)) profile.descentRodFpm = intValue;
-            if (tryParseInt(perfRow->values, "approachIAS", intValue)) profile.approachIASKt = intValue;
-            if (tryParseInt(perfRow->values, "approachROD", intValue)) profile.approachRodFpm = intValue;
-            if (tryParseInt(perfRow->values, "approachMCS", intValue)) profile.approachMcsKt = intValue;
-            if (tryParseInt(perfRow->values, "landingVat", intValue)) profile.landingVatKt = intValue;
-            if (tryParseInt(perfRow->values, "landingDistance", intValue)) profile.landingDistanceMeters = intValue;
+            applyPerformanceValues(profile, perfRow->values);
 
             return profile;
         }
@@ -508,6 +490,7 @@ namespace world
             return it->second;
         }
 
+        lock_guard<mutex> guard(m_unknownProfilesMutex);
         auto unknownIt = m_unknownProfiles.find(normalizedIcao);
         if (unknownIt == m_unknownProfiles.end())
         {

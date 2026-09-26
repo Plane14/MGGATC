@@ -5,6 +5,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <istream>
@@ -63,6 +64,7 @@ namespace world
     private:
         unordered_map<string, Profile> m_profiles;
         mutable unordered_map<string, Profile> m_unknownProfiles;
+        mutable mutex m_unknownProfilesMutex;
 
     public:
         explicit AircraftPerformanceProfileService(shared_ptr<HostServices> host);
