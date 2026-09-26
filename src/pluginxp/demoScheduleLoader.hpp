@@ -246,7 +246,7 @@ private:
         startupInfo.cb = sizeof(startupInfo);
         startupInfo.dwFlags = STARTF_USESTDHANDLES;
         startupInfo.hStdOutput = writePipe;
-        startupInfo.hStdError = writePipe;
+        startupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
         startupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 
         PROCESS_INFORMATION processInfo;
@@ -324,7 +324,6 @@ private:
         if (processId == 0)
         {
             dup2(outputPipe[1], STDOUT_FILENO);
-            dup2(outputPipe[1], STDERR_FILENO);
             close(outputPipe[0]);
             close(outputPipe[1]);
 
@@ -862,7 +861,7 @@ private:
         int arrivalIndex = 0;
         int nextFlightId = 1000;
 
-        for (int i = 0 ; i < acceptedSchedules.size() ; i++)
+        for (size_t i = 0 ; i < acceptedSchedules.size() ; i++)
         {
             auto& schedule = acceptedSchedules[i];
             const auto& liveAircraft = schedule.candidate.aircraft;
@@ -895,8 +894,11 @@ private:
                 else
                 {
                     string arrivalRunway = ((arrivalIndex++) % 2) == 0 ? arrivalRunway1 : arrivalRunway2;
+                    const string arrivalCallSign = schedule.candidate.type == runtime_schedule::CandidateType::Turnaround
+                        ? runtime_schedule::buildArrivalCallsign(liveAircraft.callSign)
+                        : liveAircraft.callSign;
                     const string arrivalFlightNo = schedule.candidate.type == runtime_schedule::CandidateType::Turnaround
-                        ? (route.flightNo.empty() ? liveAircraft.callSign + "A" : route.flightNo + "A")
+                        ? (route.flightNo.empty() ? arrivalCallSign : route.flightNo + "A")
                         : route.flightNo;
                     auto inboundFlight = createInboundFlight(
                         aircraftOption,
@@ -907,9 +909,7 @@ private:
                         arrivalRunway,
                         route.airlineIcao,
                         arrivalFlightNo,
-                        schedule.candidate.type == runtime_schedule::CandidateType::Turnaround
-                            ? runtime_schedule::buildArrivalCallsign(liveAircraft.callSign)
-                            : liveAircraft.callSign,
+                        arrivalCallSign,
                         tailNo);
                     scheduleInboundFlight(inboundFlight, arrivalRunway, schedule.arrivalTime);
 

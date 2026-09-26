@@ -14,11 +14,11 @@
 
 #include "libworld.h"
 
-using namespace std;
-using namespace world;
-
 namespace runtime_schedule
 {
+    using namespace std;
+    using namespace world;
+
     inline string trim(const string& value)
     {
         size_t start = 0;
