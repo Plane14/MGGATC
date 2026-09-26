@@ -325,6 +325,10 @@ namespace world
             }
             return fullPath;
         }
+        vector<string> findFilesInResourceDirectory(const vector<string>& relativePathParts) override
+        {
+            return {};
+        }
         vector<string> findFilesInHostDirectory(const vector<string>& relativePathParts) override
         {
             return {};

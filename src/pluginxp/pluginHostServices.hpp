@@ -164,12 +164,29 @@ public:
         return resultPath;
     }
 
+    vector<string> findFilesInResourceDirectory(const vector<string>& relativePathParts) override
+    {
+        return findFilesInDirectory(getResourceFilePath(relativePathParts));
+    }
+
     vector<string> findFilesInHostDirectory(const vector<string>& relativePathParts)
+    {
+        return findFilesInDirectory(getHostFilePath(relativePathParts));
+    }
+
+    shared_ptr<istream> openFileForRead(const string& filePath) override
+    {
+        auto file = shared_ptr<ifstream>(new ifstream());
+        file->exceptions(ifstream::failbit | ifstream::badbit);
+        file->open(filePath);
+        return file;
+    }
+private:
+    vector<string> findFilesInDirectory(const string& directoryPath)
     {
         const int bufferSize = 2048;
         char buffer[bufferSize] = { 0 };
         vector<string> results;
-        string directoryPath = getHostFilePath(relativePathParts);
         int returnedFileCount;
         string nextFileName;
 
@@ -186,7 +203,7 @@ public:
             else if (!nextFileName.empty())
             {
                 results.push_back(nextFileName);
-                writeLog("HOSTSV|DIR found[%s]", directoryPath.c_str());
+                writeLog("HOSTSV|DIR found[%s]", nextFileName.c_str());
                 nextFileName.clear();
                 fileIndex++;
             }
@@ -198,14 +215,7 @@ public:
 
         return results;
     }
-
-    shared_ptr<istream> openFileForRead(const string& filePath) override
-    {
-        auto file = shared_ptr<ifstream>(new ifstream());
-        file->exceptions(ifstream::failbit | ifstream::badbit);
-        file->open(filePath);
-        return file;
-    }
+public:
 
     void showMessageBox(const string& title, const char *format, ...) override
     {

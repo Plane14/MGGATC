@@ -30,6 +30,7 @@
 #include "pluginHostServices.hpp"
 #include "pluginMenu.hpp"
 #include "nativeTextToSpeechService.hpp"
+#include "airlineReferenceTable.hpp"
 #include "simplePhraseologyService.hpp"
 #include "xpmp2AircraftObjectService.hpp"
 #include "xplmSpeakStringTtsService.hpp"
@@ -482,27 +483,43 @@ private:
             auto world = m_host->getWorld();
             auto departureTime = world->currentTime() + 30 * 60; //P-30
             auto arrivalTime = departureTime + 3 * 60 * 60; //3h
+            auto userAircraft = UserAircraft::create(m_host);
+            string flightNo = to_string(1);
+            string callSign = flightNo;
+            AirlineReferenceTable::Entry airline;
+            if (!userAircraft->airlineIcao().empty() && AirlineReferenceTable::tryFindByIcao(userAircraft->airlineIcao(), airline))
+            {
+                callSign = airline.callsign + " " + flightNo;
+            }
+            const auto defaultArrivalAirport = [this, world]()->string {
+                for (const auto& airport : world->airports())
+                {
+                    if (airport->header().icao() != m_userAirport->header().icao())
+                    {
+                        return airport->header().icao();
+                    }
+                }
 
-            //this will be overridden by user's flight plan
+                return m_userAirport->header().icao();
+            }();
+
             auto flightPlan = shared_ptr<FlightPlan>(new FlightPlan(
                 departureTime,
                 arrivalTime,
                 m_userAirport->header().icao(),
-                "KMIA"));
+                defaultArrivalAirport));
 
-            //some of these will be overridden by user's flight plan
             auto userFlight = shared_ptr<Flight>(new Flight(
                 m_host,
                 1,
                 Flight::RulesType::IFR,
-                "UAL",
-                "737",
-                "United 737",
+                userAircraft->airlineIcao(),
+                flightNo,
+                callSign,
                 flightPlan));
 
             m_host->writeLog("initUserFlight:2");
 
-            auto userAircraft = UserAircraft::create(m_host);
             auto departureGate = m_userAirport->findClosestParkingStand(userAircraft->location());
             auto departureRunway = m_userAirport->activeDepartureRunways().at(0);
             flightPlan->setDepartureGate(departureGate ? departureGate->name() : "N/A");
