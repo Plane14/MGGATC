@@ -323,7 +323,7 @@ function createAirportService() {
             WorldServiceEndpoint.sendMessage({
                 queryTaxiPath: {
                     airportIcao: airport.icao,
-                    aircraftModelIcao: '',
+                    aircraftModelIcao: 'B738', //TODO: receive from caller,
                     fromPoint,
                     toPoint
                 }

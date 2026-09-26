@@ -414,8 +414,9 @@ private:
                 airport->findLongestRunway();
                 routeAirports.push_back(airport);
             }
-            catch (const exception&)
+            catch (const exception& e)
             {
+                m_host->writeLog("SCHEDL|Skipping route airport [%s]: %s", airport->header().icao().c_str(), e.what());
             }
         }
 

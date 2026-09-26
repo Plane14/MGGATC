@@ -30,6 +30,7 @@
 #include "pluginHostServices.hpp"
 #include "pluginMenu.hpp"
 #include "nativeTextToSpeechService.hpp"
+#include "airlineReferenceTable.hpp"
 #include "simplePhraseologyService.hpp"
 #include "xpmp2AircraftObjectService.hpp"
 #include "xplmSpeakStringTtsService.hpp"
@@ -483,6 +484,13 @@ private:
             auto departureTime = world->currentTime() + 30 * 60; //P-30
             auto arrivalTime = departureTime + 3 * 60 * 60; //3h
             auto userAircraft = UserAircraft::create(m_host);
+            string flightNo = to_string(1);
+            string callSign = flightNo;
+            AirlineReferenceTable::Entry airline;
+            if (!userAircraft->airlineIcao().empty() && AirlineReferenceTable::tryFindByIcao(userAircraft->airlineIcao(), airline))
+            {
+                callSign = airline.callsign + " " + flightNo;
+            }
             const auto defaultArrivalAirport = [this, world]()->string {
                 for (const auto& airport : world->airports())
                 {
@@ -506,8 +514,8 @@ private:
                 1,
                 Flight::RulesType::IFR,
                 userAircraft->airlineIcao(),
-                "1",
-                "1",
+                flightNo,
+                callSign,
                 flightPlan));
 
             m_host->writeLog("initUserFlight:2");
