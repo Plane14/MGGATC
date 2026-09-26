@@ -2513,6 +2513,7 @@ namespace world
             Aircraft::Category category) = 0;
         virtual string getResourceFilePath(const vector<string>& relativePathParts) = 0;
         virtual string getHostFilePath(const vector<string>& relativePathParts) = 0;
+        virtual vector<string> findFilesInResourceDirectory(const vector<string>& relativePathParts) = 0;
         virtual vector<string> findFilesInHostDirectory(const vector<string>& relativePathParts) = 0;
         virtual shared_ptr<istream> openFileForRead(const string& filePath) = 0;
         virtual void showMessageBox(const string& title, const char *format, ...) = 0;

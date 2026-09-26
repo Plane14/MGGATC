@@ -10,12 +10,14 @@
 #include <vector>
 #include <algorithm>
 #include <functional>
+#include <cctype>
 
 // PPL
 #include "owneddata.h"
 
 // AT&C
 #include "utils.h"
+#include "airlineReferenceTable.hpp"
 #include "libworld.h"
 
 using namespace std;
@@ -182,8 +184,45 @@ public:
         string icao = icaoDataRef;
         string liveryPath = liveryPathDataRef;
 
+        const auto parseAirlineIcao = [](const string& path)->string {
+            string token;
+            const auto flushToken = [&token]()->string {
+                if (token.length() != 3)
+                {
+                    token.clear();
+                    return "";
+                }
+
+                AirlineReferenceTable::Entry airline;
+                bool found = AirlineReferenceTable::tryFindByIcao(token, airline);
+                string output = found ? token : "";
+                token.clear();
+                return output;
+            };
+
+            for (char c : path)
+            {
+                unsigned char unsignedChar = static_cast<unsigned char>(c);
+                if (isalnum(unsignedChar))
+                {
+                    token += (char)toupper(unsignedChar);
+                    continue;
+                }
+
+                string airlineIcao = flushToken();
+                if (!airlineIcao.empty())
+                {
+                    return airlineIcao;
+                }
+            }
+
+            return flushToken();
+        };
+
+        string airlineIcao = parseAirlineIcao(liveryPath);
+
         host->writeLog("UPILOT|UserAircraft::create icao[%s] liveryPath[%s]", icao.c_str(), liveryPath.c_str());
 
-        return shared_ptr<UserAircraft>(new UserAircraft(host, "B738", "UAL"));
+        return shared_ptr<UserAircraft>(new UserAircraft(host, icao, airlineIcao));
     }
 };

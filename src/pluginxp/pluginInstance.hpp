@@ -482,27 +482,36 @@ private:
             auto world = m_host->getWorld();
             auto departureTime = world->currentTime() + 30 * 60; //P-30
             auto arrivalTime = departureTime + 3 * 60 * 60; //3h
+            auto userAircraft = UserAircraft::create(m_host);
+            const auto defaultArrivalAirport = [this, world]()->string {
+                for (const auto& airport : world->airports())
+                {
+                    if (airport->header().icao() != m_userAirport->header().icao())
+                    {
+                        return airport->header().icao();
+                    }
+                }
 
-            //this will be overridden by user's flight plan
+                return m_userAirport->header().icao();
+            }();
+
             auto flightPlan = shared_ptr<FlightPlan>(new FlightPlan(
                 departureTime,
                 arrivalTime,
                 m_userAirport->header().icao(),
-                "KMIA"));
+                defaultArrivalAirport));
 
-            //some of these will be overridden by user's flight plan
             auto userFlight = shared_ptr<Flight>(new Flight(
                 m_host,
                 1,
                 Flight::RulesType::IFR,
-                "UAL",
-                "737",
-                "United 737",
+                userAircraft->airlineIcao(),
+                "1",
+                "1",
                 flightPlan));
 
             m_host->writeLog("initUserFlight:2");
 
-            auto userAircraft = UserAircraft::create(m_host);
             auto departureGate = m_userAirport->findClosestParkingStand(userAircraft->location());
             auto departureRunway = m_userAirport->activeDepartureRunways().at(0);
             flightPlan->setDepartureGate(departureGate ? departureGate->name() : "N/A");
