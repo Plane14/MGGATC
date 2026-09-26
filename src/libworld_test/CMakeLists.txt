@@ -22,11 +22,12 @@ add_executable(libworld_test
     taxiNetTest.cpp
     stateMachineTest.cpp
     airlineReferenceTableTest.cpp
+    runtimeScheduleSupportTest.cpp
     unit_testable_world.hpp
 )
 
 set_property(TARGET libworld_test PROPERTY CXX_STANDARD 14)
-target_include_directories(libworld_test PUBLIC ../libworld)
+target_include_directories(libworld_test PUBLIC ../libworld ../pluginxp)
 target_link_libraries(libworld_test libworld GTest::GTest GTest::Main)
 
 message("CMAKE_CURRENT_SOURCE_DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
