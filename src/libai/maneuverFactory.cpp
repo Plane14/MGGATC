@@ -10,6 +10,7 @@
 #include "libworld.h"
 #include "basicManeuverTypes.hpp"
 #include "maneuverFactory.hpp"
+#include "aircraftPerformanceProfileService.hpp"
 #include "clearanceFactory.hpp"
 #include "intentFactory.hpp"
 #include "aiAircraft.hpp"
@@ -27,6 +28,24 @@ namespace ai
             return aircraft;
         }
         throw runtime_error("Flight [" + flight->callSign() + "]: not an AI aircraft");
+    }
+
+    static double getTaxiSpeedMetersPerSecond(
+        shared_ptr<HostServices> host,
+        shared_ptr<Flight> flight,
+        ManeuverFactory::TaxiType typeOfTaxi)
+    {
+        const auto& profile = host->services().get<AircraftPerformanceProfileService>()->resolve(
+            flight->aircraft()->modelIcao());
+        switch (typeOfTaxi)
+        {
+        case ManeuverFactory::TaxiType::HighSpeed:
+            return profile.taxiHighSpeedMetersPerSecond;
+        case ManeuverFactory::TaxiType::Pushback:
+            return profile.taxiPushbackMetersPerSecond;
+        default:
+            return profile.taxiNormalMetersPerSecond;
+        }
     }
     
     // shared_ptr<Maneuver> ManeuverFactory::departureLineUpAndWait(shared_ptr<Flight> flight)
@@ -151,7 +170,7 @@ namespace ai
 
             if (enterRoundTurn)
             {
-                float speedFactor = (typeOfTaxi == TaxiType::HighSpeed ? 10.0f : (typeOfTaxi == TaxiType::Pushback ? 1.0f : 6.0f));
+                float speedFactor = (float)getTaxiSpeedMetersPerSecond(m_host, flight, typeOfTaxi);
                 auto turnDuration = chrono::milliseconds((int)(1000 * turnArc.arcLengthMeters / speedFactor));
                 steps.push_back(taxiTurn(flight, turnArc, turnDuration, typeOfTaxi));
             }
@@ -220,7 +239,7 @@ namespace ai
         m_host->writeLog(logstr.str().c_str());
 
         auto world = m_host->getWorld();
-        float speedFactor = (typeOfTaxi == TaxiType::HighSpeed ? 12.0f : (typeOfTaxi == TaxiType::Pushback ? 1.0f : 6.0f));
+        float speedFactor = (float)getTaxiSpeedMetersPerSecond(m_host, flight, typeOfTaxi);
         auto result = shared_ptr<Maneuver>(new AnimationManeuver<GeoPoint>(
             "", 
             from,

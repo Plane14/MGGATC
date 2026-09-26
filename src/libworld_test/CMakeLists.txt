@@ -22,6 +22,7 @@ add_executable(libworld_test
     taxiNetTest.cpp
     stateMachineTest.cpp
     airlineReferenceTableTest.cpp
+    aircraftPerformanceProfileServiceTest.cpp
     runtimeScheduleSupportTest.cpp
     unit_testable_world.hpp
 )
