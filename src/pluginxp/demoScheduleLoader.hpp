@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstring>
+#include <cctype>
 #include <string>
 #include <chrono>
 #include <queue>
@@ -15,6 +16,7 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <numeric>
 
 #if IBM
 #include <windows.h>
@@ -31,21 +33,13 @@
 #include "owneddata.h"
 
 // tnc
-#include "utils.h"
 #include "libworld.h"
-#include "intentFactory.hpp"
-#include "libdataxp.h"
-#include "libai.hpp"
-#include "simplePhraseologyService.hpp"
-#include "nativeTextToSpeechService.hpp"
-#include "pluginHostServices.hpp"
+#include "airlineReferenceTable.hpp"
 #include "runtimeScheduleSupport.hpp"
-#include "xpmp2AircraftObjectService.hpp"
 
 using namespace std;
 using namespace PPL;
 using namespace world;
-using namespace ai;
 
 class DemoScheduleLoader
 {
