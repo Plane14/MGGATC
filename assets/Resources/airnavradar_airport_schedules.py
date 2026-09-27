@@ -67,8 +67,6 @@ def extract_registration(text, excluded):
             return token
         if re.match(r"^[A-Z]{1,2}-[A-Z0-9]{2,6}$", token):
             return token
-        if len(token) >= 5 and len(token) <= 7 and any(ch.isalpha() for ch in token) and any(ch.isdigit() for ch in token):
-            return token
     return ""
 
 
@@ -202,8 +200,8 @@ def build_candidate(direction, current_icao, cells):
     }
 
 
-async def scrape_direction(browser, airport_icao, direction):
-    tab = await browser.get(f"https://www.airnavradar.com/data/airports/{airport_icao}?tab={direction}")
+async def scrape_direction(browser, airport_icao, tab_name, kind):
+    tab = await browser.get(f"https://www.airnavradar.com/data/airports/{airport_icao}?tab={tab_name}")
     await tab.select("body", timeout=15)
     await accept_cookies(tab)
     await tab.sleep(3)
@@ -212,7 +210,7 @@ async def scrape_direction(browser, airport_icao, direction):
     seen = set()
     for row in await tab.select_all("tr", timeout=5):
         cells = await read_cells(row)
-        candidate = build_candidate(direction[:-1], airport_icao, cells)
+        candidate = build_candidate(kind, airport_icao, cells)
         if not candidate:
             continue
 
@@ -262,8 +260,8 @@ async def main():
     )
 
     try:
-        arrivals = await scrape_direction(browser, airport_icao, "arrivals")
-        departures = await scrape_direction(browser, airport_icao, "departures")
+        arrivals = await scrape_direction(browser, airport_icao, "arrivals", "arrival")
+        departures = await scrape_direction(browser, airport_icao, "departures", "departure")
         payload = {
             "airport_icao": airport_icao,
             "candidates": interleave(arrivals, departures),

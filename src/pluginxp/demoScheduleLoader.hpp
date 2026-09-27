@@ -770,7 +770,7 @@ private:
     bool loadLiveScheduleCandidates(
         const string& sourceLabel,
         vector<runtime_schedule::LiveScheduleCandidate> candidates,
-        int sourceCandidateCount,
+        int sourceRecordCount,
         const vector<AircraftOption>& aircraftOptions,
         const vector<shared_ptr<ParkingStand>>& usableGates,
         float loadFactor,
@@ -979,10 +979,10 @@ private:
         }
 
         m_host->writeLog(
-            "SCHEDL|Loaded [%d] %s schedule slots from [%d] candidates",
+            "SCHEDL|Loaded [%d] %s schedule slots from [%d] source records",
             acceptedSchedules.size(),
             sourceLabel.c_str(),
-            sourceCandidateCount);
+            sourceRecordCount);
         return true;
     }
 

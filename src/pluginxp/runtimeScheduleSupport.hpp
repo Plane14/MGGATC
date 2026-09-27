@@ -795,6 +795,7 @@ namespace runtime_schedule
         vector<LiveScheduleCandidate> results;
         JsonValue root = JsonValue::parse(body);
         const string normalizedAirportIcao = upper(trim(airportIcao));
+        const GeoPoint unknownLocation = GeoPoint::empty;
 
         for (const auto& item : root.at("candidates").arrayItems())
         {
@@ -863,14 +864,14 @@ namespace runtime_schedule
                 candidate.originIcao = normalizedAirportIcao;
                 candidate.destinationIcao = counterpartIcao;
                 candidate.route.airports.push_back({ normalizedAirportIcao, airportLocation });
-                candidate.route.airports.push_back({ counterpartIcao, airportLocation });
+                candidate.route.airports.push_back({ counterpartIcao, unknownLocation });
             }
             else
             {
                 candidate.type = CandidateType::ArrivalOnly;
                 candidate.originIcao = counterpartIcao;
                 candidate.destinationIcao = normalizedAirportIcao;
-                candidate.route.airports.push_back({ counterpartIcao, airportLocation });
+                candidate.route.airports.push_back({ counterpartIcao, unknownLocation });
                 candidate.route.airports.push_back({ normalizedAirportIcao, airportLocation });
             }
 
