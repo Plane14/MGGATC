@@ -787,6 +787,100 @@ namespace runtime_schedule
         return fallback;
     }
 
+    inline vector<LiveScheduleCandidate> parseAirNavRadarScheduleResponse(
+        const string& body,
+        const string& airportIcao,
+        const GeoPoint& airportLocation)
+    {
+        vector<LiveScheduleCandidate> results;
+        JsonValue root = JsonValue::parse(body);
+        const string normalizedAirportIcao = upper(trim(airportIcao));
+        const GeoPoint unknownLocation = GeoPoint::empty;
+
+        for (const auto& item : root.at("candidates").arrayItems())
+        {
+            if (!item.isObject())
+            {
+                continue;
+            }
+
+            const string kind = upper(trim(item.at("kind").stringOr("")));
+            const string counterpartIcao = upper(trim(item.at("counterpart_icao").stringOr("")));
+            if (
+                counterpartIcao.empty() ||
+                counterpartIcao == normalizedAirportIcao ||
+                (kind != "ARRIVAL" && kind != "DEPARTURE"))
+            {
+                continue;
+            }
+
+            string airlineIcao = upper(trim(item.at("airline_icao").stringOr("")));
+            string flightNo = upper(trim(item.at("flight_no").stringOr("")));
+            string callSign = sanitizeCallsign(item.at("call_sign").stringOr(""));
+            if (callSign.empty() && !airlineIcao.empty() && !flightNo.empty())
+            {
+                callSign = sanitizeCallsign(airlineIcao + flightNo);
+            }
+            if (callSign.empty())
+            {
+                callSign = sanitizeCallsign(flightNo);
+            }
+            if (callSign.empty())
+            {
+                callSign = sanitizeCallsign(
+                    normalizedAirportIcao +
+                    string(kind == "ARRIVAL" ? "A" : "D") +
+                    to_string(results.size() + 1));
+            }
+
+            RouteData route = {
+                callSign,
+                flightNo,
+                airlineIcao,
+                true,
+                true,
+                {}
+            };
+
+            LiveScheduleCandidate candidate = {};
+            candidate.aircraft = {
+                "",
+                callSign,
+                upper(trim(item.at("registration").stringOr(""))),
+                upper(trim(item.at("model_icao").stringOr(""))),
+                airportLocation,
+                item.at("altitude_ft").numberOr(0),
+                item.at("ground_speed_kt").numberOr(0),
+                kind == "DEPARTURE"
+            };
+            candidate.route = route;
+            candidate.airportIndex = kind == "DEPARTURE" ? 0 : 1;
+            candidate.distanceMeters = item.at("distance_meters").numberOr(
+                item.at("sequence").numberOr(results.size()));
+
+            if (kind == "DEPARTURE")
+            {
+                candidate.type = CandidateType::DepartureOnly;
+                candidate.originIcao = normalizedAirportIcao;
+                candidate.destinationIcao = counterpartIcao;
+                candidate.route.airports.push_back({ normalizedAirportIcao, airportLocation });
+                candidate.route.airports.push_back({ counterpartIcao, unknownLocation });
+            }
+            else
+            {
+                candidate.type = CandidateType::ArrivalOnly;
+                candidate.originIcao = counterpartIcao;
+                candidate.destinationIcao = normalizedAirportIcao;
+                candidate.route.airports.push_back({ counterpartIcao, unknownLocation });
+                candidate.route.airports.push_back({ normalizedAirportIcao, airportLocation });
+            }
+
+            results.push_back(candidate);
+        }
+
+        return results;
+    }
+
     inline vector<string> splitCsvRow(const string& line)
     {
         vector<string> values;
