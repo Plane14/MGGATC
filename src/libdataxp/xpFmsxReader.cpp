@@ -438,31 +438,6 @@ void XPFmsxReader::parseFmsRouteLegs(shared_ptr<FlightPlan> plan, const vector<L
     addRouteLegs(plan, routePoints);
 }
 
-void XPFmsxReader::parseFmxRouteLegs(shared_ptr<FlightPlan> plan, const vector<Line>& lines)
-{
-    vector<RoutePoint> routePoints;
-    for (const auto& line : lines)
-    {
-        vector<string> fields = splitPreservingEmpty(line.text, ',');
-        if (fields.size() < 5)
-        {
-            break;
-        }
-
-        double latitude = 0;
-        double longitude = 0;
-        if (tryParseDouble(fields[3], latitude) && tryParseDouble(fields[4], longitude))
-        {
-            routePoints.push_back({
-                trim(fields[0]),
-                GeoPoint(latitude, longitude, 0)
-            });
-        }
-    }
-
-    addRouteLegs(plan, routePoints);
-}
-
 void XPFmsxReader::addRouteLegs(shared_ptr<FlightPlan> plan, const vector<RoutePoint>& routePoints)
 {
     if (routePoints.size() < 2)
@@ -582,6 +557,7 @@ void XPFmsxReader::tryLoadMissedApproachNavData(shared_ptr<FlightPlan> plan)
                 fixes,
                 navaids,
                 resolvedPoint);
+            float courseHeading = parseCourseHeading(fields);
 
             plan->addLeg(make_shared<FlightPlan::Leg>(
                 FlightPlan::LegType::GoAround,
@@ -592,8 +568,8 @@ void XPFmsxReader::tryLoadMissedApproachNavData(shared_ptr<FlightPlan> plan)
                 0.0f,
                 resolvedPoint,
                 hasTargetPoint,
-                parseCourseHeading(fields),
-                parseCourseHeading(fields) > 0.0f,
+                courseHeading,
+                courseHeading > 0.0f,
                 pathTerm
             ));
 

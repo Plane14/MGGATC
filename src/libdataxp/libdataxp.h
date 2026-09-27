@@ -143,7 +143,6 @@ private:
     void parseFmsFormat(shared_ptr<FlightPlan> plan, const vector<Line>& lines);
     void parseFmxFormat(shared_ptr<FlightPlan> plan, const vector<Line>& lines);
     void parseFmsRouteLegs(shared_ptr<FlightPlan> plan, const vector<Line>& lines, int startIndex);
-    void parseFmxRouteLegs(shared_ptr<FlightPlan> plan, const vector<Line>& lines);
     void addRouteLegs(shared_ptr<FlightPlan> plan, const vector<RoutePoint>& routePoints);
     void tryLoadMissedApproachNavData(shared_ptr<FlightPlan> plan);
 private:

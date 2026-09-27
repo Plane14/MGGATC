@@ -442,8 +442,9 @@ void XPAirportReader::parseTrafficFlowTime1004(istream& input)
         return;
     }
 
-    const string& startToken = isdigit(token1[0]) ? token1 : token2;
-    const string& endToken = isdigit(token1[0]) ? token2 : token3;
+    bool firstTokenIsDigit = isdigit((unsigned char)token1[0]) != 0;
+    const string& startToken = firstTokenIsDigit ? token1 : token2;
+    const string& endToken = firstTokenIsDigit ? token2 : token3;
     if (endToken.empty())
     {
         return;
