@@ -1217,7 +1217,7 @@ private:
 
         vector<unsigned int> indices(usableStands.size());
         iota(indices.begin(), indices.end(), 0);
-        shuffle(indices.begin(), indices.end(), std::default_random_engine());
+        shuffle(indices.begin(), indices.end(), std::default_random_engine(std::random_device{}()));
 
         const int requestedCount = max(1, (int)(usableStands.size() * loadFactor));
         vector<runtime_schedule::MilitaryAirbase> militaryAirbases = loadMilitaryAirbases();
@@ -1281,7 +1281,7 @@ private:
                 }
                 if (currentMilitaryBase && currentMilitaryBase->operation == "HELICOPTER")
                 {
-                    return SpecialTrafficRole::MilitaryTransport;
+                    return SpecialTrafficRole::MilitaryRotorcraft;
                 }
                 return stand->type() == ParkingStand::Type::Gate
                     ? SpecialTrafficRole::MilitaryTransport

@@ -206,7 +206,7 @@ namespace ai
                 return maneuverDepartureAwaitIfrClearance();
             }
 
-            return M.sequence(Maneuver::Type::DepartureAwaitIfrClearance, "await_vfr_departure_ready", {
+            return M.sequence(Maneuver::Type::DepartureAwaitVfrReady, "await_vfr_departure_ready", {
                 M.delay(chrono::seconds(5))
             });
         }

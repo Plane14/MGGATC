@@ -1419,6 +1419,7 @@ namespace world
             Unspecified = 0,
             Flight = 1,
             DepartureAwaitIfrClearance = 5,
+            DepartureAwaitVfrReady = 6,
             DepartureAwaitPushback = 10,
             DeparturePushbackAndStart = 20,
             DepartureAwaitTaxi = 30,
