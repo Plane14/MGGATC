@@ -462,6 +462,48 @@ TEST(XPAirportReaderTest, readAptDat_realKMIA) {
     assertTaxiEdgesExist(airport, { "S", "U", "V", "M", "Z", "K", "M10", "JJ", "S2" });
 }
 
+TEST(XPAirportReaderTest, readAptDat_realKMIA_selectTrafficFlowsByConditions) {
+    XPAirportReader reader(makeHost());
+    ifstream aptDat;
+    openTestInputStream("apt_kmia.dat", aptDat);
+
+    reader.readAirport(aptDat);
+    auto airport = reader.getAirport();
+
+    vector<string> eastDeparture;
+    vector<string> eastArrival;
+    AirportFlowConditions eastVfr = {
+        90.0f,
+        10.0f,
+        3000.0f,
+        10.0f,
+        12 * 60
+    };
+    ASSERT_TRUE(airport->selectRunwaysForFlowConditions(eastVfr, eastDeparture, eastArrival));
+    ASSERT_EQ(eastDeparture.size(), 2);
+    ASSERT_EQ(eastArrival.size(), 2);
+    EXPECT_EQ(eastDeparture[0], "08R");
+    EXPECT_EQ(eastDeparture[1], "12");
+    EXPECT_EQ(eastArrival[0], "09");
+    EXPECT_EQ(eastArrival[1], "08L");
+
+    vector<string> lowVisDeparture;
+    vector<string> lowVisArrival;
+    AirportFlowConditions eastIfr = {
+        90.0f,
+        10.0f,
+        0.0f,
+        0.0f,
+        12 * 60
+    };
+    ASSERT_TRUE(airport->selectRunwaysForFlowConditions(eastIfr, lowVisDeparture, lowVisArrival));
+    ASSERT_EQ(lowVisDeparture.size(), 2);
+    ASSERT_EQ(lowVisArrival.size(), 1);
+    EXPECT_EQ(lowVisDeparture[0], "08R");
+    EXPECT_EQ(lowVisDeparture[1], "09");
+    EXPECT_EQ(lowVisArrival[0], "09");
+}
+
 TEST(XPAirportReaderTest, readAptDat_realKORD) {
     XPAirportReader reader(makeHost());
     ifstream aptDat;

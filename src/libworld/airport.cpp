@@ -2,12 +2,134 @@
 // This file is part of AT&C project which simulates virtual world of air traffic and ATC.
 // Code licensing terms are available at https://github.com/felix-b/atc/blob/master/LICENSE
 // 
+#include <algorithm>
 #include <memory>
 #include <sstream>
 #include "libworld.h"
 
 namespace world
 {
+    static bool isValueWithinWrappedRange(int value, int minValue, int maxValue, int wrapValue)
+    {
+        while (value < 0)
+        {
+            value += wrapValue;
+        }
+        while (value >= wrapValue)
+        {
+            value -= wrapValue;
+        }
+        while (minValue < 0)
+        {
+            minValue += wrapValue;
+        }
+        while (maxValue < 0)
+        {
+            maxValue += wrapValue;
+        }
+        while (minValue >= wrapValue)
+        {
+            minValue -= wrapValue;
+        }
+        while (maxValue >= wrapValue)
+        {
+            maxValue -= wrapValue;
+        }
+
+        return minValue <= maxValue
+            ? value >= minValue && value <= maxValue
+            : value >= minValue || value <= maxValue;
+    }
+
+    bool AirportTrafficFlow::matches(const AirportFlowConditions& conditions) const
+    {
+        if (hasWindRule)
+        {
+            if (conditions.windSpeedKt > maxWindSpeedKt)
+            {
+                return false;
+            }
+            if (!isValueWithinWrappedRange(
+                (int)conditions.windDirectionTrue,
+                minWindDirection,
+                maxWindDirection,
+                360))
+            {
+                return false;
+            }
+        }
+
+        if (hasCeilingRule && conditions.ceilingFeet < minCeilingFeet)
+        {
+            return false;
+        }
+
+        if (hasVisibilityRule && conditions.visibilitySm < minVisibilitySm)
+        {
+            return false;
+        }
+
+        if (hasTimeRule && !isValueWithinWrappedRange(
+            conditions.localTimeMinutes,
+            startTimeMinutes,
+            endTimeMinutes,
+            24 * 60))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    const AirportTrafficFlow* Airport::findMatchingTrafficFlow(const AirportFlowConditions& conditions) const
+    {
+        for (const auto& flow : m_trafficFlows)
+        {
+            if (flow.matches(conditions))
+            {
+                return &flow;
+            }
+        }
+
+        return nullptr;
+    }
+
+    bool Airport::selectRunwaysForFlowConditions(
+        const AirportFlowConditions& conditions,
+        vector<string>& departureRunways,
+        vector<string>& arrivalRunways) const
+    {
+        const auto* flow = findMatchingTrafficFlow(conditions);
+        if (!flow)
+        {
+            return false;
+        }
+
+        departureRunways.clear();
+        arrivalRunways.clear();
+
+        const auto appendUnique = [](vector<string>& names, const string& runwayName) {
+            if (find(names.begin(), names.end(), runwayName) == names.end())
+            {
+                names.push_back(runwayName);
+            }
+        };
+
+        for (const auto& runwayUse : flow->runwayUses)
+        {
+            if (runwayUse.departures)
+            {
+                appendUnique(departureRunways, runwayUse.runwayName);
+            }
+            if (runwayUse.arrivals)
+            {
+                appendUnique(arrivalRunways, runwayUse.runwayName);
+            }
+        }
+
+        return !departureRunways.empty() || !arrivalRunways.empty();
+    }
+
     shared_ptr<Runway> Airport::findLongestRunway() const
     {
         const auto compareRunwayLength = [](const shared_ptr<Runway>& r1, const shared_ptr<Runway>& r2) {

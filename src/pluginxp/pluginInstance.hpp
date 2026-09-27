@@ -33,6 +33,7 @@
 #include "airlineReferenceTable.hpp"
 #include "simplePhraseologyService.hpp"
 #include "xpmp2AircraftObjectService.hpp"
+#include "xplaneAirportFlowProvider.hpp"
 #include "xplmSpeakStringTtsService.hpp"
 #include "pluginWorldLoader.hpp"
 #include "demoScheduleLoader.hpp"
@@ -635,6 +636,7 @@ private:
         auto intentFactory = shared_ptr<IntentFactory>(new IntentFactory(hostServices));
         auto transcriptInterface = shared_ptr<TranscriptInterface>(new MenuBasedTranscriptInterface(hostServices));
         auto aircraftPerformanceProfiles = shared_ptr<AircraftPerformanceProfileService>(new AircraftPerformanceProfileService(hostServices));
+        auto airportFlowProvider = make_shared<XPlaneAirportFlowProvider>();
 
         hostServices->services().use<PluginConfiguration>(configuration);
         hostServices->services().use<AircraftObjectService>(aircraftObjectService);
@@ -643,6 +645,7 @@ private:
         hostServices->services().use<PhraseologyService>(phraseologyService);
         hostServices->services().use<TranscriptInterface>(transcriptInterface);
         hostServices->services().use<AircraftPerformanceProfileService>(aircraftPerformanceProfiles);
+        hostServices->services().use<AirportFlowProvider>(airportFlowProvider);
 
 #if IBM
         auto serverController = server::ServerControllerInterface::create(hostServices);

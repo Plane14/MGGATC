@@ -719,7 +719,11 @@ namespace ai
                     ? getImmediateTakeoffBeforeLandingMaxSeconds(numberOneForLanding, subject)
                     : m_timing.RWY_TIME_IMMEDIATE_TAKEOFF_BEFORE_LANDING_MAX);
 
-            if (numberOneForLanding && secondsToTouchdown < m_timing.RWY_TIME_INFINITY)
+            if (
+                numberOneForLanding &&
+                !isHelicopter(numberOneForLanding->flight) &&
+                !isHelicopter(subject->flight) &&
+                secondsToTouchdown < m_timing.RWY_TIME_INFINITY)
             {
                 traffic.push_back(TrafficAdvisory::onFinal(
                     numberOneForLanding->flight->aircraft()->modelIcao(),

@@ -168,6 +168,17 @@ namespace ai
                         newClearance = landingClearance;
                     }
                     break;
+                case TowerGoAroundIntent::IntentCode:
+                    {
+                        auto goAroundIntent = dynamic_pointer_cast<TowerGoAroundIntent>(intent);
+                        if (goAroundIntent)
+                        {
+                            newClearance = goAroundIntent->request();
+                            m_continueApproach = false;
+                            m_aircraft->setManeuver(maneuverGoAround(goAroundIntent->request()));
+                        }
+                    }
+                    break;
                 case GroundArrivalTaxiReplyIntent::IntentCode:
                     newClearance = dynamic_pointer_cast<GroundArrivalTaxiReplyIntent>(intent)->clearance();
                     break;
@@ -534,6 +545,102 @@ namespace ai
                 }),
                 logTouchDown,
                 touchDownAndDeccelerate
+            });
+        }
+
+        shared_ptr<Maneuver> maneuverGoAround(shared_ptr<GoAroundRequest> request)
+        {
+            const auto& profile = performanceProfile();
+            const auto goAroundLegs = flight()->plan()->legsOfType(FlightPlan::LegType::GoAround);
+            const auto goAroundSpeedKt = (double)max(
+                performance_model::calcFinalApproachGroundSpeedKt(profile),
+                profile.climb150IASKt);
+            const auto goAroundClimbFpm = (double)max(700, profile.initialClimbRocFpm);
+
+            vector<shared_ptr<Maneuver>> steps = {
+                M.transmitIntent(
+                    flight(),
+                    I.pilotGoAroundReadback(request, m_lastReceivedIntentId),
+                    "readback_go_around"),
+                M.instantAction([=] {
+                    m_aircraft->setLights(Aircraft::LightBits::BeaconLandingNavStrobe);
+                    m_aircraft->setGroundSpeedKt(max(m_aircraft->groundSpeedKt(), goAroundSpeedKt));
+                    m_aircraft->setVerticalSpeedFpm(goAroundClimbFpm);
+                    m_aircraft->setAttitude(m_aircraft->attitude().withPitch(7.5f).withRoll(0.0f));
+                }),
+                M.delay(chrono::seconds(2)),
+                M.instantAction([this] {
+                    m_aircraft->setGearState(0.0f);
+                    m_aircraft->setFlapState(0.15f);
+                })
+            };
+
+            if (!goAroundLegs.empty())
+            {
+                for (const auto& leg : goAroundLegs)
+                {
+                    steps.push_back(M.deferred([this, leg] {
+                        return maneuverGoAroundLeg(leg);
+                    }));
+                }
+            }
+            else
+            {
+                auto arrivalAirport = m_helper.getArrivalAirport(flight());
+                const auto& runwayEnd = arrivalAirport->getRunwayEndOrThrow(request->runway());
+                auto fallbackLeg = make_shared<FlightPlan::Leg>(
+                    FlightPlan::LegType::GoAround,
+                    GeoPolygon::empty(),
+                    request->runway(),
+                    request->runway(),
+                    flight()->landingRunwayElevationFeet() + 3000.0f,
+                    0.0f,
+                    GeoPoint::empty,
+                    false,
+                    runwayEnd.heading(),
+                    true,
+                    "VA");
+                steps.push_back(M.deferred([this, fallbackLeg] {
+                    return maneuverGoAroundLeg(fallbackLeg);
+                }));
+            }
+
+            return M.sequence(Maneuver::Type::ArrivalApproach, "go_around", steps);
+        }
+
+        shared_ptr<Maneuver> maneuverGoAroundLeg(shared_ptr<FlightPlan::Leg> leg)
+        {
+            return M.sequence(Maneuver::Type::ArrivalApproach, "go_around_leg", {
+                M.deferred([this, leg] {
+                    if (!leg->hasCourseHeading() && !leg->hasTargetPoint())
+                    {
+                        return M.instantAction([] {});
+                    }
+
+                    float targetHeading = leg->hasCourseHeading()
+                        ? leg->courseHeading()
+                        : GeoMath::getHeadingFromPoints(m_aircraft->location(), leg->targetPoint());
+                    return M.airborneTurn(flight(), m_aircraft->attitude().heading(), targetHeading);
+                }),
+                M.instantAction([this, leg] {
+                    if (!leg->hasCourseHeading() && !leg->hasTargetPoint())
+                    {
+                        return;
+                    }
+
+                    float targetHeading = leg->hasCourseHeading()
+                        ? leg->courseHeading()
+                        : GeoMath::getHeadingFromPoints(m_aircraft->location(), leg->targetPoint());
+                    m_aircraft->setAttitude(m_aircraft->attitude().withHeading(targetHeading));
+                }),
+                M.await(Maneuver::Type::ArrivalApproach, "await_go_around_leg", [this, leg] {
+                    const float currentAltitudeFeet = m_aircraft->altitude().type() == Altitude::Type::MSL
+                        ? m_aircraft->altitude().feet()
+                        : flight()->landingRunwayElevationFeet() + m_aircraft->altitude().feet();
+                    const bool altitudeReached = leg->targetAltitude() <= 0.0f || currentAltitudeFeet >= leg->targetAltitude();
+                    const bool pointReached = !leg->hasTargetPoint() || isPointBehind(leg->targetPoint());
+                    return altitudeReached && pointReached;
+                })
             });
         }
 

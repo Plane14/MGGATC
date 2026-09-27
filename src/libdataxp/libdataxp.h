@@ -46,9 +46,11 @@ private:
     vector<shared_ptr<ParkingStand>> m_parkingStands;
     unordered_map<int, shared_ptr<TaxiNode>> m_taxiNodeById;
     vector<ControllerPosition::Structure> m_controllerPositions;
+    vector<AirportTrafficFlow> m_trafficFlows;
     unordered_set<int> m_parsedFrequencyKhz;
     unordered_set<int> m_parsedFrequencyLineCodes;
     shared_ptr<ControlledAirspace> m_airspace;
+    int m_activeTrafficFlowIndex;
 public:
     explicit XPAirportReader(
         shared_ptr<HostServices> _host,
@@ -72,6 +74,12 @@ private:
     void parseTaxiEdge1202(istream &input);
     void parseGroundEdge1206(istream &input);
     void parseRunwayActiveZone1204(istream& input, shared_ptr<TaxiEdge> edge);
+    void parseTrafficFlow1000(istream& input);
+    void parseTrafficFlowWind1001(istream& input);
+    void parseTrafficFlowCeiling1002(istream& input);
+    void parseTrafficFlowVisibility1003(istream& input);
+    void parseTrafficFlowTime1004(istream& input);
+    void parseTrafficFlowRunwayUse1110(istream& input);
     void parseStartupLocation1300(istream &input);
     void parseMetadata1302(istream &input);
     void parseControlFrequency(int lineCode, istream &input);
@@ -80,6 +88,7 @@ private:
     shared_ptr<Airport> assembleAirportOrThrow();
     void ensureLocalAdvisoryPosition();
     string formatErrorMessage(istream &input, const streampos& position, int extractedLineCode, const char *what);
+    AirportTrafficFlow* currentTrafficFlow();
 public:
     static string readFirstToken(istream &input);
     static string readToEndOfLine(istream &input);
@@ -113,6 +122,12 @@ private:
         string token;
         string suffix;
         char delimiter;
+        string text;
+    };
+    struct RoutePoint
+    {
+        string ident;
+        GeoPoint location;
     };
 private:
     shared_ptr<HostServices> m_host;
@@ -127,6 +142,10 @@ private:
     bool isFmxFormat(const vector<Line>& lines);
     void parseFmsFormat(shared_ptr<FlightPlan> plan, const vector<Line>& lines);
     void parseFmxFormat(shared_ptr<FlightPlan> plan, const vector<Line>& lines);
+    void parseFmsRouteLegs(shared_ptr<FlightPlan> plan, const vector<Line>& lines, int startIndex);
+    void parseFmxRouteLegs(shared_ptr<FlightPlan> plan, const vector<Line>& lines);
+    void addRouteLegs(shared_ptr<FlightPlan> plan, const vector<RoutePoint>& routePoints);
+    void tryLoadMissedApproachNavData(shared_ptr<FlightPlan> plan);
 private:
     static int countCharOccurrences(const string& s, char c);
     static string trimLead(const string& s, const string& prefix);
