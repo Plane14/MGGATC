@@ -264,7 +264,7 @@ namespace ai
                     I.pilotReportPattern(flight(), landingRunway.name(), PilotReportPatternIntent::Leg::Base),
                     "ctaf_base"),
                 M.instantAction([=] {
-                    setPatternState(geometry.downwindHeading, geometry.baseSpeedKt, 0.0f);
+                    setPatternState(geometry.baseHeading, geometry.baseSpeedKt, 0.0f);
                 }),
                 M.airborneTurn(flight(), geometry.downwindHeading, geometry.baseHeading),
                 M.await(Maneuver::Type::Unspecified, "await_pattern_final_turn", [this, geometry]{

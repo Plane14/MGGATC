@@ -33,6 +33,40 @@ namespace
 
         return WorldBuilder::assembleAirport(host, header, { runway }, {}, {}, {}, tower, nullptr);
     }
+
+    shared_ptr<Flight> createVfrFlight(shared_ptr<TestHostServices> host, int flightNo, const string& airportIcao)
+    {
+        auto airport = host->getWorld()->getAirport(airportIcao);
+        auto aircraft = make_shared<TestHostServices::TestAIAircraft>(
+            host,
+            flightNo,
+            "C172",
+            "TES",
+            to_string(flightNo),
+            Aircraft::Category::LightProp);
+        auto flightPlan = make_shared<FlightPlan>(1000, 2000, airportIcao, "KXYZ");
+        auto flight = make_shared<Flight>(
+            host,
+            flightNo,
+            Flight::RulesType::VFR,
+            "TES",
+            to_string(flightNo),
+            "TES " + to_string(flightNo),
+            flightPlan);
+        auto pilot = make_shared<TestHostServices::TestAIPilot>(
+            host,
+            flightNo,
+            "Tes",
+            flight);
+
+        flight->setAircraft(aircraft);
+        flight->setPilot(pilot);
+        aircraft->setLocation(airport->header().datum());
+        aircraft->setAltitude(Altitude::ground());
+        host->getWorld()->addFlight(flight);
+
+        return flight;
+    }
 }
 
 TEST(SimplePhraseologyServiceTest, verbalizePatternReport_usesPatternLegCall)
@@ -40,7 +74,7 @@ TEST(SimplePhraseologyServiceTest, verbalizePatternReport_usesPatternLegCall)
     auto host = TestHostServices::createWithWorldAirports({ createAdvisoryAirport });
     auto airport = host->getWorld()->getAirport("EFGH");
     auto advisory = airport->localAt(airport->header().datum());
-    auto flight = host->addIfrFlight(101, "EFGH", "KXYZ", airport->header().datum(), Altitude::ground(), "C172").ptr;
+    auto flight = createVfrFlight(host, 101, "EFGH");
     SimplePhraseologyService phraseology(host);
 
     auto text = phraseology.verbalizeIntent(make_shared<PilotReportPatternIntent>(
@@ -58,7 +92,7 @@ TEST(SimplePhraseologyServiceTest, advisoryTakeoffUsesDiscretionPhrase)
     auto host = TestHostServices::createWithWorldAirports({ createAdvisoryAirport });
     auto airport = host->getWorld()->getAirport("EFGH");
     auto advisory = airport->localAt(airport->header().datum());
-    auto flight = host->addIfrFlight(102, "EFGH", "KXYZ", airport->header().datum(), Altitude::ground(), "C172").ptr;
+    auto flight = createVfrFlight(host, 102, "EFGH");
     SimplePhraseologyService phraseology(host);
 
     Clearance::Header header = {
