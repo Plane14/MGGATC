@@ -414,6 +414,18 @@ namespace world
             ));
         }
 
+        shared_ptr<Intent> pilotReportPattern(shared_ptr<Flight> flight, const string& runway, PilotReportPatternIntent::Leg leg)
+        {
+            auto tower = m_helper.getArrivalTower(flight, flight->aircraft()->location());
+            return shared_ptr<Intent>(new PilotReportPatternIntent(
+                m_nextIntentId++,
+                flight,
+                tower,
+                runway,
+                leg
+            ));
+        }
+
         shared_ptr<Intent> towerContinueApproach(
             shared_ptr<Flight> flight,
             shared_ptr<ControllerPosition> tower,

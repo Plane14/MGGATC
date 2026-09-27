@@ -122,6 +122,9 @@ namespace world
         };
 
         const auto assemblePosition = [&](const ControllerPosition::Structure& init) {
+            const bool isAdvisoryPosition =
+                init.type == ControllerPosition::Type::Local &&
+                (isAdvisoryOnly || isAdvisoryText(init.callSign));
             auto frequency = shared_ptr<Frequency>(new Frequency(
                 host,
                 init.frequencyKhz,
@@ -140,6 +143,7 @@ namespace world
                 frequency,
                 radarScope
             ));
+            position->m_isAdvisory = isAdvisoryPosition;
             frequency->m_controllerPosition = position;
 
             return position;
@@ -152,6 +156,7 @@ namespace world
 
         tower->m_name = header.icao() + (isAdvisoryOnly ? " Advisory" : " Tower");
         tower->m_type = ControlFacility::Type::Tower;
+        tower->m_isAdvisoryOnly = isAdvisoryOnly;
         tower->m_airspace = airspace;
         
         for (const auto& posInit : positions)

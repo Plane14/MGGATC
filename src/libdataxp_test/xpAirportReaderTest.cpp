@@ -550,6 +550,7 @@ TEST(XPAirportReaderTest, readAptDat_assembleTower) {
 
     ASSERT_TRUE(!!tower);
     EXPECT_EQ(airport->tower().get(), tower.get());
+    EXPECT_FALSE(airport->isAdvisoryOnly());
     EXPECT_EQ(tower->type(), ControlFacility::Type::Tower);
     EXPECT_EQ(tower->callSign(), "J F K"); //TODO: Kennedy
     EXPECT_EQ(tower->airport().get(), airport.get());
@@ -594,10 +595,12 @@ TEST(XPAirportReaderTest, readAptDat_assembleAdvisoryTowerFromUnicom) {
     const auto tower = airport->tower();
 
     ASSERT_TRUE(!!tower);
+    EXPECT_TRUE(airport->isAdvisoryOnly());
     ASSERT_EQ(tower->positions().size(), 1);
     EXPECT_EQ(tower->positions()[0]->type(), ControllerPosition::Type::Local);
     EXPECT_EQ(tower->positions()[0]->frequency()->khz(), 122800);
     EXPECT_EQ(tower->positions()[0]->callSign(), "J F K Advisory");
+    EXPECT_TRUE(tower->positions()[0]->isAdvisory());
     EXPECT_EQ(airport->localAt(airport->header().datum()).get(), tower->positions()[0].get());
     EXPECT_EQ(airport->groundAt(airport->header().datum()).get(), tower->positions()[0].get());
     EXPECT_EQ(airport->clearanceDeliveryAt(airport->header().datum()).get(), tower->positions()[0].get());
@@ -620,10 +623,12 @@ TEST(XPAirportReaderTest, readAptDat_addsFallbackLocalWhenOnlyGroundExists) {
     const auto tower = airport->tower();
 
     ASSERT_TRUE(!!tower);
+    EXPECT_FALSE(airport->isAdvisoryOnly());
     ASSERT_EQ(tower->positions().size(), 2);
     EXPECT_EQ(tower->positions()[0]->type(), ControllerPosition::Type::Ground);
     EXPECT_EQ(tower->positions()[1]->type(), ControllerPosition::Type::Local);
     EXPECT_EQ(tower->positions()[1]->frequency()->khz(), FREQUENCY_UNICOM_1228);
+    EXPECT_TRUE(tower->positions()[1]->isAdvisory());
     EXPECT_EQ(airport->localAt(airport->header().datum()).get(), tower->positions()[1].get());
 }
 

@@ -103,6 +103,7 @@ namespace ai
         void registerIntentHandlers()
         {
             AI_CONTROLLER_MAP_INTENT(PilotReportFinalIntent, onPilotReportFinal);
+            AI_CONTROLLER_MAP_INTENT(PilotReportPatternIntent, onPilotReportPattern);
             AI_CONTROLLER_MAP_INTENT(PilotCheckInWithTowerIntent, onDeparturePilotCheckInWithTower);
             AI_CONTROLLER_MAP_INTENT(PilotLineUpAndWaitReadbackIntent, onPilotLineUpReadback);
             AI_CONTROLLER_MAP_INTENT(GroundCrossRunwayRequestFromTowerIntent, onCrossRunwayRequestFromGround);
@@ -265,6 +266,18 @@ namespace ai
                 [](DeclineReason, int){ }
             );
              */
+        }
+
+        void onPilotReportPattern(shared_ptr<PilotReportPatternIntent> intent)
+        {
+            const char *leg = intent->leg() == PilotReportPatternIntent::Leg::Downwind
+                ? "downwind"
+                : "base";
+            host()->writeLog(
+                "AICONT|Pattern report arrival[%s] leg[%s] runway[%s]",
+                intent->subjectFlight()->callSign().c_str(),
+                leg,
+                intent->runway().c_str());
         }
 
         void onPilotLineUpReadback(shared_ptr<PilotLineUpAndWaitReadbackIntent> intent)

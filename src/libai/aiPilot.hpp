@@ -14,8 +14,10 @@
 #include "intentTypes.hpp"
 #include "intentFactory.hpp"
 #include "aiAircraft.hpp"
+#include "clearanceFactory.hpp"
 #include "aircraftPerformanceModel.hpp"
 #include "aircraftPerformanceProfileService.hpp"
+#include "trafficPattern.hpp"
 #include "libai.hpp"
 
 using namespace std;
@@ -213,7 +215,65 @@ namespace ai
 
         shared_ptr<Maneuver> maneuverFinalToGate(const Runway::End& landingRunway)
         {
+            if (traffic_pattern::shouldUseAdvisoryPattern(m_helper.getArrivalAirport(flight()), flight()))
+            {
+                return maneuverAdvisoryPatternToGate(landingRunway);
+            }
+
             return M.sequence(Maneuver::Type::ArrivalApproach, "final_to_gate", {
+                maneuverFinal(),
+                maneuverLanding(),
+                M.deferred([this]() {
+                    return maneuverArrivalTaxiToGate();
+                })
+            });
+        }
+
+        shared_ptr<Maneuver> maneuverAdvisoryPatternToGate(const Runway::End& landingRunway)
+        {
+            const auto geometry = traffic_pattern::buildLeftPattern(
+                performanceProfile(),
+                landingRunway,
+                aircraft()->category());
+            auto tower = m_helper.getArrivalTower(flight(), landingRunway.centerlinePoint().geo());
+
+            const auto setPatternState = [this](float heading, float speedKt, float verticalSpeedFpm) {
+                m_aircraft->setAttitude(m_aircraft->attitude().withHeading(heading));
+                m_aircraft->setGroundSpeedKt(speedKt);
+                m_aircraft->setVerticalSpeedFpm(verticalSpeedFpm);
+                m_aircraft->setLights(Aircraft::LightBits::BeaconLandingNavStrobe);
+            };
+
+            return M.sequence(Maneuver::Type::ArrivalApproach, "advisory_pattern_to_gate", {
+                M.instantAction([this] {
+                    m_continueApproach = false;
+                }),
+                M.tuneComRadio(flight(), tower->frequency()),
+                M.instantAction([=] {
+                    setPatternState(geometry.downwindHeading, geometry.downwindSpeedKt, 0.0f);
+                }),
+                M.transmitIntent(
+                    flight(),
+                    I.pilotReportPattern(flight(), landingRunway.name(), PilotReportPatternIntent::Leg::Downwind),
+                    "ctaf_downwind"),
+                M.await(Maneuver::Type::Unspecified, "await_pattern_base_turn", [this, geometry]{
+                    return isPointBehind(geometry.baseTurn);
+                }),
+                M.transmitIntent(
+                    flight(),
+                    I.pilotReportPattern(flight(), landingRunway.name(), PilotReportPatternIntent::Leg::Base),
+                    "ctaf_base"),
+                M.instantAction([=] {
+                    setPatternState(geometry.downwindHeading, geometry.baseSpeedKt, 0.0f);
+                }),
+                M.airborneTurn(flight(), geometry.downwindHeading, geometry.baseHeading),
+                M.await(Maneuver::Type::Unspecified, "await_pattern_final_turn", [this, geometry]{
+                    return isPointBehind(geometry.finalStart);
+                }),
+                M.instantAction([=] {
+                    setPatternState(geometry.finalHeading, geometry.finalSpeedKt, -geometry.finalSinkRateFpm);
+                }),
+                M.airborneTurn(flight(), geometry.baseHeading, geometry.finalHeading),
                 maneuverFinal(),
                 maneuverLanding(),
                 M.deferred([this]() {
@@ -482,6 +542,7 @@ namespace ai
             WorldHelper helper(host());
             auto aircraft = flight()->aircraft();
             auto airport = helper.getArrivalAirport(flight());
+            const bool advisoryOnlyAirport = airport->isAdvisoryOnly();
             auto runway = airport->getRunwayOrThrow(m_flightPlan->arrivalRunway());
             const auto& runwayEnd = runway->getEndOrThrow(m_flightPlan->arrivalRunway());
             auto gate = airport->getParkingStandOrThrow(m_flightPlan->arrivalGate());
@@ -582,6 +643,39 @@ namespace ai
                 }
                 return maneuverAwaitCrossRunway(airport, holdShortEdge);
             };
+            auto arrivalTaxiCommunicate = advisoryOnlyAirport
+                ? M.sequence(Maneuver::Type::Unspecified, "", {
+                    M.await(Maneuver::Type::Unspecified, "", [this,exitFirstEdge]{
+                        return (!exitFirstEdge) || isPointBehind(exitFirstEdge->node2()->location().geo());
+                    }),
+                    M.delay(chrono::seconds(3)),
+                    M.transmitIntent(flight(), I.pilotArrivalCheckInWithGround(
+                        flight(), runwayEnd.name(), exitName, exitLastEdge
+                    )),
+                    M.instantAction([this, exitLastEdge] {
+                        auto clearance = host()->services().get<ClearanceFactory>()->arrivalTaxiClearance(
+                            flight(),
+                            exitLastEdge
+                                ? exitLastEdge->node2()->location().geo()
+                                : flight()->aircraft()->location());
+                        flight()->addClearance(clearance);
+                    }),
+                })
+                : M.sequence(Maneuver::Type::Unspecified, "", {
+                    M.await(Maneuver::Type::Unspecified, "", [this,exitFirstEdge]{
+                        return (!exitFirstEdge) || isPointBehind(exitFirstEdge->node2()->location().geo());
+                    }),
+                    M.delay(chrono::seconds(3)),
+                    M.tuneComRadio(flight(), airport->groundAt(aircraft->location())->frequency()),
+                    M.transmitIntent(flight(), I.pilotArrivalCheckInWithGround(
+                        flight(), runwayEnd.name(), exitName, exitLastEdge
+                    )),
+                    M.awaitClearance(flight(), Clearance::Type::ArrivalTaxiClearance, "await_taxi_clrnc"),
+                    M.deferred([this]{
+                        auto clearance = flight()->findClearanceOrThrow<ArrivalTaxiClearance>(Clearance::Type::ArrivalTaxiClearance);
+                        return M.transmitIntent(flight(), I.pilotArrivalTaxiReadback(flight(), m_lastReceivedIntentId));
+                    }),
+                });
 
             return M.sequence(Maneuver::Type::ArrivalTaxi, "arrival_taxi", {
                 M.instantAction([this] {
@@ -590,21 +684,7 @@ namespace ai
                 M.parallel(Maneuver::Type::Unspecified, "", {
                     flapsZero,
                     speedBrakeDown,
-                    M.sequence(Maneuver::Type::Unspecified, "", {
-                        M.await(Maneuver::Type::Unspecified, "", [this,exitFirstEdge]{
-                            return (!exitFirstEdge) || isPointBehind(exitFirstEdge->node2()->location().geo());
-                        }),
-                        M.delay(chrono::seconds(3)),
-                        M.tuneComRadio(flight(), airport->groundAt(aircraft->location())->frequency()),
-                        M.transmitIntent(flight(), I.pilotArrivalCheckInWithGround(
-                            flight(), runwayEnd.name(), exitName, exitLastEdge
-                        )),
-                        M.awaitClearance(flight(), Clearance::Type::ArrivalTaxiClearance, "await_taxi_clrnc"),
-                        M.deferred([this]{
-                            auto clearance = flight()->findClearanceOrThrow<ArrivalTaxiClearance>(Clearance::Type::ArrivalTaxiClearance);
-                            return M.transmitIntent(flight(), I.pilotArrivalTaxiReadback(flight(), m_lastReceivedIntentId));
-                        }),
-                    }),
+                    arrivalTaxiCommunicate,
                     M.sequence(Maneuver::Type::Unspecified, "", {
                        exitRunway,
                        logVacatedActive,
@@ -823,8 +903,16 @@ namespace ai
 
         shared_ptr<Maneuver> maneuverDepartureAwaitLineup(const string& runwayName, shared_ptr<TaxiEdge> holdShortEdge)
         {
+            const bool advisoryOnlyAirport = m_departureAirport->isAdvisoryOnly();
             return M.sequence(Maneuver::Type::Unspecified, "await_lineup", {
                 M.deferred([=]() {
+                    if (advisoryOnlyAirport)
+                    {
+                        return M.instantAction([this] {
+                            auto tower = m_helper.getDepartureTower(flight());
+                            m_departureTowerKhz = tower->frequency()->khz();
+                        });
+                    }
                     if (m_departureTowerKhz == 0)
                     {
                         return M.transmitIntent(flight(), I.pilotReportHoldingShort(
