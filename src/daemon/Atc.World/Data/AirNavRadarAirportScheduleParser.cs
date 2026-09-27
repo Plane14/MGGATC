@@ -18,7 +18,9 @@ public static class AirNavRadarAirportScheduleParser
             ?? throw new InvalidOperationException("AirNavRadar scraper returned an empty JSON payload.");
 
         var airportIcao = NormalizeRequiredCode(payload.AirportIcao, nameof(payload.AirportIcao));
-        var fetchedAtUtc = ParseRequiredUtc(payload.FetchedAtUtc, nameof(payload.FetchedAtUtc));
+        var fetchedAtUtcText = payload.FetchedAtUtc
+            ?? throw new InvalidOperationException("AirNavRadar scraper payload is missing required field 'FetchedAtUtc'.");
+        var fetchedAtUtc = ParseRequiredUtc(fetchedAtUtcText, nameof(payload.FetchedAtUtc));
         var source = string.IsNullOrWhiteSpace(payload.Source)
             ? "airnavradar-nodriver"
             : payload.Source.Trim();

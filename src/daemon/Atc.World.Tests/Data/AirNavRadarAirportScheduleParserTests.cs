@@ -11,39 +11,37 @@ public class AirNavRadarAirportScheduleParserTests
     [Test]
     public void Parse_ShouldMapNormalizedScheduleSnapshot()
     {
-        const string json = """
-            {
-              "airportIcao": "lemd",
-              "fetchedAtUtc": "2026-09-27T19:00:00Z",
-              "source": "airnavradar-nodriver",
-              "arrivals": [
-                {
-                  "flightNumber": "ibe1234",
-                  "callsign": "ibe1234",
-                  "tailNo": "ecmxy",
-                  "aircraftTypeIcao": "a320",
-                  "airlineIcao": "ibe",
-                  "originIcao": "lebl",
-                  "destinationIcao": "lemd",
-                  "scheduledTimeUtc": "2026-09-27T19:20:00Z",
-                  "estimatedTimeUtc": "2026-09-27T19:18:00Z"
-                }
-              ],
-              "departures": [
-                {
-                  "flightNumber": "ryr4321",
-                  "callsign": "ryr4321",
-                  "tailNo": "eirua",
-                  "aircraftTypeIcao": "b738",
-                  "airlineIcao": "ryr",
-                  "originIcao": "lemd",
-                  "destinationIcao": "egkk",
-                  "scheduledTimeUtc": "2026-09-27T20:00:00Z",
-                  "actualTimeUtc": "2026-09-27T20:03:00Z"
-                }
-              ]
-            }
-            """;
+        const string json = @"{
+  ""airportIcao"": ""lemd"",
+  ""fetchedAtUtc"": ""2026-09-27T19:00:00Z"",
+  ""source"": ""airnavradar-nodriver"",
+  ""arrivals"": [
+    {
+      ""flightNumber"": ""ibe1234"",
+      ""callsign"": ""ibe1234"",
+      ""tailNo"": ""ecmxy"",
+      ""aircraftTypeIcao"": ""a320"",
+      ""airlineIcao"": ""ibe"",
+      ""originIcao"": ""lebl"",
+      ""destinationIcao"": ""lemd"",
+      ""scheduledTimeUtc"": ""2026-09-27T19:20:00Z"",
+      ""estimatedTimeUtc"": ""2026-09-27T19:18:00Z""
+    }
+  ],
+  ""departures"": [
+    {
+      ""flightNumber"": ""ryr4321"",
+      ""callsign"": ""ryr4321"",
+      ""tailNo"": ""eirua"",
+      ""aircraftTypeIcao"": ""b738"",
+      ""airlineIcao"": ""ryr"",
+      ""originIcao"": ""lemd"",
+      ""destinationIcao"": ""egkk"",
+      ""scheduledTimeUtc"": ""2026-09-27T20:00:00Z"",
+      ""actualTimeUtc"": ""2026-09-27T20:03:00Z""
+    }
+  ]
+}";
 
         var snapshot = AirNavRadarAirportScheduleParser.Parse(json);
 
@@ -73,30 +71,28 @@ public class AirNavRadarAirportScheduleParserTests
     [Test]
     public void Parse_ShouldSkipIncompleteEntriesAndFallbackScheduledTime()
     {
-        const string json = """
-            {
-              "airportIcao": "LEMD",
-              "fetchedAtUtc": "2026-09-27T19:00:00Z",
-              "source": "",
-              "arrivals": [
-                {
-                  "flightNumber": "",
-                  "originIcao": "LEPA",
-                  "destinationIcao": "LEMD",
-                  "scheduledTimeUtc": "2026-09-27T19:20:00Z"
-                }
-              ],
-              "departures": [
-                {
-                  "flightNumber": "AEA987",
-                  "callsign": "aea987",
-                  "originIcao": "LEMD",
-                  "destinationIcao": "LEVC",
-                  "estimatedTimeUtc": "2026-09-27T20:25:00Z"
-                }
-              ]
-            }
-            """;
+        const string json = @"{
+  ""airportIcao"": ""LEMD"",
+  ""fetchedAtUtc"": ""2026-09-27T19:00:00Z"",
+  ""source"": """",
+  ""arrivals"": [
+    {
+      ""flightNumber"": """",
+      ""originIcao"": ""LEPA"",
+      ""destinationIcao"": ""LEMD"",
+      ""scheduledTimeUtc"": ""2026-09-27T19:20:00Z""
+    }
+  ],
+  ""departures"": [
+    {
+      ""flightNumber"": ""AEA987"",
+      ""callsign"": ""aea987"",
+      ""originIcao"": ""LEMD"",
+      ""destinationIcao"": ""LEVC"",
+      ""estimatedTimeUtc"": ""2026-09-27T20:25:00Z""
+    }
+  ]
+}";
 
         var snapshot = AirNavRadarAirportScheduleParser.Parse(json);
 
