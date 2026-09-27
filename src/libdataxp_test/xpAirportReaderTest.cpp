@@ -577,6 +577,56 @@ TEST(XPAirportReaderTest, readAptDat_assembleTower) {
     EXPECT_EQ(tower->positions()[4]->callSign(), "J F K Departure"); //TODO: "New York Departure"
 }
 
+TEST(XPAirportReaderTest, readAptDat_assembleAdvisoryTowerFromUnicom) {
+    auto airspace = makeAirspace(40.63, -73.77, 10.0, "KJFK");
+    stringstream aptDat = makeAptDat({
+        "1    13 0 0 KJFK John F Kennedy Intl",
+        "1302 datum_lat 40.63",
+        "1302 datum_lon -73.77",
+        "1051 122800 UNICOM",
+    });
+    XPAirportReader builder(makeHost(), -1, [&](const Airport::Header& header) {
+        return airspace;
+    });
+    builder.readAirport(aptDat);
+
+    const auto airport = builder.getAirport();
+    const auto tower = airport->tower();
+
+    ASSERT_TRUE(!!tower);
+    ASSERT_EQ(tower->positions().size(), 1);
+    EXPECT_EQ(tower->positions()[0]->type(), ControllerPosition::Type::Local);
+    EXPECT_EQ(tower->positions()[0]->frequency()->khz(), 122800);
+    EXPECT_EQ(tower->positions()[0]->callSign(), "J F K Advisory");
+    EXPECT_EQ(airport->localAt(airport->header().datum()).get(), tower->positions()[0].get());
+    EXPECT_EQ(airport->groundAt(airport->header().datum()).get(), tower->positions()[0].get());
+    EXPECT_EQ(airport->clearanceDeliveryAt(airport->header().datum()).get(), tower->positions()[0].get());
+}
+
+TEST(XPAirportReaderTest, readAptDat_addsFallbackLocalWhenOnlyGroundExists) {
+    auto airspace = makeAirspace(40.63, -73.77, 10.0, "KJFK");
+    stringstream aptDat = makeAptDat({
+        "1    13 0 0 KJFK John F Kennedy Intl",
+        "1302 datum_lat 40.63",
+        "1302 datum_lon -73.77",
+        "1053 121650 GND",
+    });
+    XPAirportReader builder(makeHost(), -1, [&](const Airport::Header& header) {
+        return airspace;
+    });
+    builder.readAirport(aptDat);
+
+    const auto airport = builder.getAirport();
+    const auto tower = airport->tower();
+
+    ASSERT_TRUE(!!tower);
+    ASSERT_EQ(tower->positions().size(), 2);
+    EXPECT_EQ(tower->positions()[0]->type(), ControllerPosition::Type::Ground);
+    EXPECT_EQ(tower->positions()[1]->type(), ControllerPosition::Type::Local);
+    EXPECT_EQ(tower->positions()[1]->frequency()->khz(), FREQUENCY_UNICOM_1228);
+    EXPECT_EQ(airport->localAt(airport->header().datum()).get(), tower->positions()[1].get());
+}
+
 TEST(XPAptDatReaderTest, readAptDat_allAirports)
 {
     ifstream input;

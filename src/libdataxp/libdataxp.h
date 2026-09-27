@@ -38,6 +38,8 @@ private:
     float m_elevation;
     double m_datumLatitude;
     double m_datumLongitude;
+    int m_advisoryFrequencyKhz;
+    string m_advisoryCallSign;
     vector<shared_ptr<TaxiNode>> m_taxiNodes;
     vector<shared_ptr<TaxiEdge>> m_taxiEdges;
     vector<shared_ptr<Runway>> m_runways;
@@ -76,6 +78,7 @@ private:
     bool isControlFrequencyLine(int lineCode);
     bool invokeFilterCallback();
     shared_ptr<Airport> assembleAirportOrThrow();
+    void ensureLocalAdvisoryPosition();
     string formatErrorMessage(istream &input, const streampos& position, int extractedLineCode, const char *what);
 public:
     static string readFirstToken(istream &input);

@@ -12,9 +12,11 @@
 #include <vector>
 #include <unordered_set>
 #include <chrono>
+#include <cctype>
 #include <sstream>
 
 #include "libworld.h"
+#include "aircraftPerformanceProfileService.hpp"
 #include "clearanceFactory.hpp"
 #include "intentTypes.hpp"
 #include "intentFactory.hpp"
@@ -342,7 +344,10 @@ namespace ai
             }
 
             // clear next arrival to land if close enough; if too close and cannot be cleared, go around
-            if (secondsToTouchdown <= m_timing.RWY_TIME_CLEARED_BEFORE_LANDING_MIN)
+            const int clearanceBeforeLandingMinSeconds = numberOneForLanding
+                ? getLandingClearanceBeforeLandingMinSeconds(numberOneForLanding)
+                : m_timing.RWY_TIME_CLEARED_BEFORE_LANDING_MIN;
+            if (secondsToTouchdown <= clearanceBeforeLandingMinSeconds)
             {
                 if (!m_board.clearedToLand && tryClearToLand(numberOneForLanding, reason, traffic))
                 {
@@ -353,7 +358,10 @@ namespace ai
                 //TODO: ping occupants to start moving their tails
                 // if (!safe) { ... }
 
-                if (secondsToTouchdown < m_timing.RWY_TIME_VACATED_BEFORE_LANDING_MIN && !safe)
+                const int vacatedBeforeLandingMinSeconds = numberOneForLanding
+                    ? getVacatedBeforeLandingMinSeconds(numberOneForLanding)
+                    : m_timing.RWY_TIME_VACATED_BEFORE_LANDING_MIN;
+                if (secondsToTouchdown < vacatedBeforeLandingMinSeconds && !safe)
                 {
                     if (reason == DeclineReason::None)
                     {
@@ -384,7 +392,7 @@ namespace ai
                 {
                     auto arrival = m_board.arrivalsLine.at(0);
                     secondsToTouchdown = getSecondsToTouchdown(arrival);
-                    if (secondsToTouchdown > m_timing.RWY_TIME_VACATED_BEFORE_LANDING_MIN)
+                    if (secondsToTouchdown > getVacatedBeforeLandingMinSeconds(arrival))
                     {
                         break;
                     }
@@ -612,7 +620,10 @@ namespace ai
                 secondsToTouchdown = getSecondsToTouchdown(numberOneForLanding);
             }
 
-            if (secondsToTouchdown <= m_timing.RWY_TIME_CROSS_BEFORE_LANDING_MIN)
+            const int crossBeforeLandingMinSeconds = numberOneForLanding
+                ? getCrossBeforeLandingMinSeconds(numberOneForLanding)
+                : m_timing.RWY_TIME_CROSS_BEFORE_LANDING_MIN;
+            if (secondsToTouchdown <= crossBeforeLandingMinSeconds)
             {
                 m_host->writeLog(
                     "AICONT|TWR-RWY-MUTEX[%s] CONFLICT CANNOT CLEAR [%s] to cross: [%s] landing in [%f] sec, state[0x%X]",
@@ -680,7 +691,10 @@ namespace ai
                 secondsToTouchdown = getSecondsToTouchdown(numberOneForLanding);
             }
 
-            if (subject != m_board.authorizedLuaw && secondsToTouchdown <= m_timing.RWY_TIME_TAKEOFF_BEFORE_LANDING_MIN)
+            const int takeoffBeforeLandingMinSeconds = numberOneForLanding
+                ? getTakeoffBeforeLandingMinSeconds(numberOneForLanding, subject)
+                : m_timing.RWY_TIME_TAKEOFF_BEFORE_LANDING_MIN;
+            if (subject != m_board.authorizedLuaw && secondsToTouchdown <= takeoffBeforeLandingMinSeconds)
             {
                 m_host->writeLog(
                     "AICONT|TWR-RWY-MUTEX[%s] CONFLICT CANNOT CLEAR [%s] for takeoff: [%s] landing in [%f] sec, state[0x%X]",
@@ -700,7 +714,10 @@ namespace ai
                 m_board.departuresLine.erase(m_board.departuresLine.begin());
             }
 
-            immediate = secondsToTouchdown < m_timing.RWY_TIME_IMMEDIATE_TAKEOFF_BEFORE_LANDING_MAX;
+            immediate = secondsToTouchdown < (
+                numberOneForLanding
+                    ? getImmediateTakeoffBeforeLandingMaxSeconds(numberOneForLanding, subject)
+                    : m_timing.RWY_TIME_IMMEDIATE_TAKEOFF_BEFORE_LANDING_MAX);
 
             if (numberOneForLanding && secondsToTouchdown < m_timing.RWY_TIME_INFINITY)
             {
@@ -760,7 +777,10 @@ namespace ai
                 secondsToTouchdown = getSecondsToTouchdown(numberOneForLanding);
             }
 
-            if (secondsToTouchdown < m_timing.RWY_TIME_LUAW_AUTHORIZATION_BEFORE_LANDING_MIN)
+            const int luawBeforeLandingMinSeconds = numberOneForLanding
+                ? getLuawBeforeLandingMinSeconds(numberOneForLanding, subject)
+                : m_timing.RWY_TIME_LUAW_AUTHORIZATION_BEFORE_LANDING_MIN;
+            if (secondsToTouchdown < luawBeforeLandingMinSeconds)
             {
                 m_host->writeLog(
                     "AICONT|TWR-RWY-MUTEX[%s] CONFLICT CANNOT AUTHORIZE [%s] for LUAW: [%s] landing in [%f] sec, state[0x%X]",
@@ -803,7 +823,7 @@ namespace ai
             DeclineReason reason;
             float secondsToTouchdown = getSecondsToTouchdown(subject);
 
-            if (secondsToTouchdown < m_timing.RWY_TIME_CLEARED_BEFORE_LANDING_MAX)
+            if (secondsToTouchdown < getLandingClearanceBeforeLandingMaxSeconds(subject))
             {
                 if (tryClearToLand(subject, reason, traffic))
                 {
@@ -996,6 +1016,170 @@ namespace ai
 //            }
 //            return DeclineReason::None;
 //        }
+
+        const AircraftPerformanceProfileService::Profile& getPerformanceProfile(shared_ptr<Flight> flight) const
+        {
+            return m_host->services().get<AircraftPerformanceProfileService>()->resolve(
+                flight->aircraft()->modelIcao());
+        }
+
+        bool isHelicopter(shared_ptr<Flight> flight) const
+        {
+            const auto& profile = getPerformanceProfile(flight);
+            return (profile.category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter;
+        }
+
+        int getWakeWeight(shared_ptr<Flight> flight) const
+        {
+            const auto& profile = getPerformanceProfile(flight);
+            if (!profile.wakeTurbulenceCategory.empty())
+            {
+                const char wakeCode = (char)toupper((unsigned char)profile.wakeTurbulenceCategory[0]);
+                if (wakeCode == 'J' || wakeCode == 'S')
+                {
+                    return 5;
+                }
+                if (wakeCode == 'H')
+                {
+                    return 4;
+                }
+                if (wakeCode == 'M')
+                {
+                    return 3;
+                }
+                if (wakeCode == 'L')
+                {
+                    return 2;
+                }
+            }
+
+            if ((profile.category & Aircraft::Category::Heavy) == Aircraft::Category::Heavy)
+            {
+                return 4;
+            }
+            if (
+                (profile.category & Aircraft::Category::LightProp) == Aircraft::Category::LightProp ||
+                (profile.category & Aircraft::Category::Prop) == Aircraft::Category::Prop ||
+                (profile.category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter)
+            {
+                return 2;
+            }
+
+            return 3;
+        }
+
+        float getRequiredArrivalSpacingMiles(
+            shared_ptr<FlightStrip> arrival,
+            shared_ptr<FlightStrip> departure = nullptr) const
+        {
+            if (!arrival)
+            {
+                return 3.0f;
+            }
+
+            if (isHelicopter(arrival->flight) || (departure && isHelicopter(departure->flight)))
+            {
+                return 1.5f;
+            }
+
+            if (!departure)
+            {
+                return getWakeWeight(arrival->flight) >= 4
+                    ? 4.0f
+                    : 3.0f;
+            }
+
+            const int departureWake = getWakeWeight(departure->flight);
+            const int arrivalWake = getWakeWeight(arrival->flight);
+            if (departureWake >= 4 && arrivalWake <= 2)
+            {
+                return 6.0f;
+            }
+            if (departureWake >= 4)
+            {
+                return 5.0f;
+            }
+            if (departureWake >= 3 && arrivalWake <= 2)
+            {
+                return 4.0f;
+            }
+
+            return 3.0f;
+        }
+
+        int getRequiredArrivalSpacingSeconds(
+            shared_ptr<FlightStrip> arrival,
+            shared_ptr<FlightStrip> departure = nullptr) const
+        {
+            if (!arrival)
+            {
+                return 0;
+            }
+
+            const double arrivalSpeedKt = max(60.0, arrival->flight->aircraft()->groundSpeedKt());
+            return (int)(
+                getRequiredArrivalSpacingMiles(arrival, departure) * 3600.0 / arrivalSpeedKt + 0.999);
+        }
+
+        int getLandingClearanceBeforeLandingMinSeconds(shared_ptr<FlightStrip> arrival) const
+        {
+            const int baseMinSeconds = isHelicopter(arrival->flight)
+                ? 60
+                : m_timing.RWY_TIME_CLEARED_BEFORE_LANDING_MIN;
+            return max(baseMinSeconds, getRequiredArrivalSpacingSeconds(arrival) + 15);
+        }
+
+        int getLandingClearanceBeforeLandingMaxSeconds(shared_ptr<FlightStrip> arrival) const
+        {
+            return min(
+                m_timing.RWY_TIME_INFINITY,
+                getLandingClearanceBeforeLandingMinSeconds(arrival) + 20);
+        }
+
+        int getVacatedBeforeLandingMinSeconds(shared_ptr<FlightStrip> arrival) const
+        {
+            return isHelicopter(arrival->flight)
+                ? 10
+                : m_timing.RWY_TIME_VACATED_BEFORE_LANDING_MIN;
+        }
+
+        int getTakeoffBeforeLandingMinSeconds(
+            shared_ptr<FlightStrip> arrival,
+            shared_ptr<FlightStrip> departure) const
+        {
+            const int baseMinSeconds = isHelicopter(arrival->flight)
+                ? 60
+                : m_timing.RWY_TIME_TAKEOFF_BEFORE_LANDING_MIN;
+            return max(baseMinSeconds, getRequiredArrivalSpacingSeconds(arrival, departure));
+        }
+
+        int getImmediateTakeoffBeforeLandingMaxSeconds(
+            shared_ptr<FlightStrip> arrival,
+            shared_ptr<FlightStrip> departure) const
+        {
+            const int baseImmediateSeconds = isHelicopter(arrival->flight)
+                ? 120
+                : m_timing.RWY_TIME_IMMEDIATE_TAKEOFF_BEFORE_LANDING_MAX;
+            return max(baseImmediateSeconds, getTakeoffBeforeLandingMinSeconds(arrival, departure) + 30);
+        }
+
+        int getLuawBeforeLandingMinSeconds(
+            shared_ptr<FlightStrip> arrival,
+            shared_ptr<FlightStrip> departure) const
+        {
+            const int baseMinSeconds = isHelicopter(arrival->flight)
+                ? 75
+                : m_timing.RWY_TIME_LUAW_AUTHORIZATION_BEFORE_LANDING_MIN;
+            return max(baseMinSeconds, getTakeoffBeforeLandingMinSeconds(arrival, departure) + 20);
+        }
+
+        int getCrossBeforeLandingMinSeconds(shared_ptr<FlightStrip> arrival) const
+        {
+            const int baseMinSeconds = isHelicopter(arrival->flight)
+                ? 45
+                : m_timing.RWY_TIME_CROSS_BEFORE_LANDING_MIN;
+            return max(baseMinSeconds, getRequiredArrivalSpacingSeconds(arrival));
+        }
 
         float getSecondsToTouchdown(shared_ptr<FlightStrip> strip)
         {

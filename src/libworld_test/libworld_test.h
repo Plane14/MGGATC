@@ -7,6 +7,7 @@
 #include <memory>
 #include <functional>
 #include "libworld.h"
+#include "aircraftPerformanceProfileService.hpp"
 #include "intentFactory.hpp"
 #include "clearanceTypes.hpp"
 
@@ -425,8 +426,31 @@ namespace world
     private:
         void initializeServices(shared_ptr<TestHostServices> me)
         {
+            unordered_map<string, AircraftPerformanceProfileService::Profile> profiles;
+            const auto addProfile = [&profiles](const string& icao, const string& docClass, const string& wake) {
+                profiles.insert({
+                    icao,
+                    AircraftPerformanceProfileService::createSafeDefault(icao, docClass, wake)
+                });
+            };
+            addProfile("A109", "H1T", "L");
+            addProfile("A320", "L2J", "M");
+            addProfile("A10", "L2J", "M");
+            addProfile("A400", "L4T", "H");
+            addProfile("B412", "H1T", "L");
+            addProfile("B52", "L4J", "H");
+            addProfile("B738", "L2J", "M");
+            addProfile("C17", "L4J", "H");
+            addProfile("C172", "L1P", "L");
+            addProfile("F16", "L1J", "M");
+            addProfile("H60", "H1T", "M");
+            addProfile("PA28", "L1P", "L");
+            addProfile("SR22", "L1P", "L");
+
             m_aircraftObjectService = make_shared<TestAircraftObjectService>();
             m_textToSpeechService = make_shared<TestTtsService>();
+            services().use<AircraftPerformanceProfileService>(
+                make_shared<AircraftPerformanceProfileService>(profiles));
             services().use<AircraftObjectService>(m_aircraftObjectService);
             services().use<TextToSpeechService>(m_textToSpeechService);
         }

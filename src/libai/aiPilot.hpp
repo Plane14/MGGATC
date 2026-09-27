@@ -185,7 +185,7 @@ namespace ai
 
             auto result = M.sequence(Maneuver::Type::Flight, "flight_cycle", {
                 M.delay(chrono::seconds(secondsBeforeStart)),
-                maneuverDepartureAwaitIfrClearance(),
+                maneuverDepartureAwaitInitialClearance(),
                 maneuverDepartureAwaitPushback(),
                 maneuverDeparturePushbackAndStart(),
                 maneuverDepartureAwaitTaxi(),
@@ -197,6 +197,18 @@ namespace ai
             });
 
             return result;
+        }
+
+        shared_ptr<Maneuver> maneuverDepartureAwaitInitialClearance()
+        {
+            if (flight()->rules() == Flight::RulesType::IFR)
+            {
+                return maneuverDepartureAwaitIfrClearance();
+            }
+
+            return M.sequence(Maneuver::Type::DepartureAwaitIfrClearance, "await_vfr_departure_ready", {
+                M.delay(chrono::seconds(5))
+            });
         }
 
         shared_ptr<Maneuver> maneuverFinalToGate(const Runway::End& landingRunway)

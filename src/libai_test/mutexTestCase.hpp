@@ -92,6 +92,9 @@ private:
     bool m_checkedInWasSet = false;
     bool m_clearedToLand = false;
     bool m_clearedToLandWasSet = false;
+    string m_subjectTypeIcao = "B738";
+    string m_numberOneTypeIcao = "A320";
+    string m_otherTrafficTypeIcao = "A320";
     int m_numberInLine = -1;
     int m_secondsToTouchdown = -1;
     int m_whenSecondsToTouchdown = -1;
@@ -129,6 +132,9 @@ public:
 
 public:
     MutexTestCase& type(ScenarioType _scenarioType) { m_scenarioType = _scenarioType; return *this; }
+    MutexTestCase& subjectType(const string& value) { m_subjectTypeIcao = value; return *this; }
+    MutexTestCase& numberOneType(const string& value) { m_numberOneTypeIcao = value; return *this; }
+    MutexTestCase& otherTrafficType(const string& value) { m_otherTrafficTypeIcao = value; return *this; }
 
     Given& given(RunwaySituation value)
     {
@@ -459,7 +465,7 @@ private:
         switch (m_scenarioType)
         {
         case ScenarioType::Arrival:
-            m_arrivalUnderTest = addArrivalOnFinal("B738", 123, m_secondsToTouchdown);
+            m_arrivalUnderTest = addArrivalOnFinal(m_subjectTypeIcao, 123, m_secondsToTouchdown);
             if (m_checkedIn)
             {
                 if (m_clearedToLand)
@@ -474,14 +480,14 @@ private:
             }
             break;
         case ScenarioType::Departure:
-            m_departurelUnderTest = addDepartureHoldingShort("B738", 123, m_numberInLine * 50);
+            m_departurelUnderTest = addDepartureHoldingShort(m_subjectTypeIcao, 123, m_numberInLine * 50);
             if (m_checkedIn)
             {
                 m_board.departuresLine.push_back(make_shared<FlightStrip>(m_departurelUnderTest.ptr, m_listener));
             }
             break;
         case ScenarioType::LUAW:
-            m_departurelUnderTest = addDepartureLinedUp("B738", 123);
+            m_departurelUnderTest = addDepartureLinedUp(m_subjectTypeIcao, 123);
             if (m_checkedIn)
             {
                 m_board.departuresLine.push_back(make_shared<FlightStrip>(m_departurelUnderTest.ptr, m_listener));
@@ -492,7 +498,7 @@ private:
             }
             break;
         case ScenarioType::Crossing:
-            m_taxiingUnderTest = addTaxiing("B738", 123, GeoPoint(30.15, 45.60));
+            m_taxiingUnderTest = addTaxiing(m_subjectTypeIcao, 123, GeoPoint(30.15, 45.60));
             if (m_checkedIn)
             {
                 m_board.crossingsLine.push_back(make_shared<FlightStrip>(m_taxiingUnderTest.ptr, m_listener));
@@ -506,17 +512,17 @@ private:
         switch (m_scenarioType)
         {
         case ScenarioType::Arrival:
-            m_numberOneInLine = addArrivalOnFinal("A320", 102, m_secondsToTouchdown / 2);
+            m_numberOneInLine = addArrivalOnFinal(m_numberOneTypeIcao, 102, m_secondsToTouchdown / 2);
             m_board.arrivalsLine.push_back(make_shared<FlightStrip>(m_numberOneInLine.ptr, noopListener));
             break;
         case ScenarioType::Departure:
-            m_numberOneInLine = addDepartureHoldingShort("A320", 102, 50);
+            m_numberOneInLine = addDepartureHoldingShort(m_numberOneTypeIcao, 102, 50);
             m_board.departuresLine.push_back(make_shared<FlightStrip>(m_numberOneInLine.ptr, noopListener));
             break;
         case ScenarioType::LUAW:
             throw runtime_error("MutexTestCase: ScenarioType::LUAW cannot be used with numberInLine==2");
         case ScenarioType::Crossing:
-            m_numberOneInLine = addTaxiing("A320", 102, GeoPoint(30.15, 45.60));
+            m_numberOneInLine = addTaxiing(m_numberOneTypeIcao, 102, GeoPoint(30.15, 45.60));
             m_board.crossingsLine.push_back(make_shared<FlightStrip>(m_numberOneInLine.ptr, noopListener));
             break;
         }
@@ -532,48 +538,48 @@ private:
         case RunwaySituation::Vacated:
             if (m_scenarioType != ScenarioType::Arrival && m_secondsToTouchdown < m_timing.RWY_TIME_INFINITY)
             {
-                m_anotherArrival = addArrivalOnFinal("A320", 456, m_secondsToTouchdown);
+                m_anotherArrival = addArrivalOnFinal(m_otherTrafficTypeIcao, 456, m_secondsToTouchdown);
                 m_board.arrivalsLine.push_back(make_shared<FlightStrip>(m_anotherArrival.ptr, noopListener));
             }
             break;
         case RunwaySituation::ClearedForLanding:
             m_board.flags = RWY_STATE_CLEARED_LANDING;
-            m_anotherArrival = addArrivalOnFinal("A320", 456, 5);
+            m_anotherArrival = addArrivalOnFinal(m_otherTrafficTypeIcao, 456, 5);
             m_board.clearedToLand = make_shared<FlightStrip>(m_anotherArrival.ptr, noopListener);
             break;
         case RunwaySituation::ClearedForTakeoff:
             m_board.flags = RWY_STATE_CLEARED_TAKEOFF;
-            m_anotherDeparture = addDepartureLinedUp("A320", 456);
+            m_anotherDeparture = addDepartureLinedUp(m_otherTrafficTypeIcao, 456);
             m_board.clearedToTakeoff = make_shared<FlightStrip>(m_anotherDeparture.ptr, noopListener);
             break;
         case RunwaySituation::LuawAuthorized:
             m_board.flags = RWY_STATE_CLEARED_CROSSING | RWY_STATE_AUTHORIZED_LUAW;
-            m_anotherTaxiing = addTaxiing("A320", 103, GeoPoint(30.10, 45.30));
+            m_anotherTaxiing = addTaxiing(m_otherTrafficTypeIcao, 103, GeoPoint(30.10, 45.30));
             anotherTaxiingStrip = make_shared<FlightStrip>(m_anotherTaxiing.ptr, noopListener);
             m_board.clearedToCross.insert(anotherTaxiingStrip);
             m_board.crossing.insert(anotherTaxiingStrip);
-            m_anotherDeparture = addDepartureLinedUp("A320", 456);
+            m_anotherDeparture = addDepartureLinedUp(m_otherTrafficTypeIcao, 456);
             m_board.authorizedLuaw = make_shared<FlightStrip>(m_anotherDeparture.ptr, noopListener);
             break;
         case RunwaySituation::ClearedForCrossing:
             m_board.flags = RWY_STATE_CLEARED_CROSSING;
-            m_anotherTaxiing = addTaxiing("A320", 456, GeoPoint(30.10, 45.30));
+            m_anotherTaxiing = addTaxiing(m_otherTrafficTypeIcao, 456, GeoPoint(30.10, 45.30));
             m_board.clearedToCross.insert(make_shared<FlightStrip>(m_anotherTaxiing.ptr, noopListener));
             break;
         case RunwaySituation::LandedNotVacated:
             m_board.flags = RWY_STATE_CLEARED_LANDING;
-            m_anotherArrival = addArrivalRollingOnRunway("A320", 456);
+            m_anotherArrival = addArrivalRollingOnRunway(m_otherTrafficTypeIcao, 456);
             m_board.clearedToLand = make_shared<FlightStrip>(m_anotherArrival.ptr, noopListener);
             break;
         case RunwaySituation::Incursion:
             m_board.flags = RWY_STATE_VACATED;
-            m_anotherTaxiing = addTaxiing("A320", 456, GeoPoint(30.10, 45.30));
+            m_anotherTaxiing = addTaxiing(m_otherTrafficTypeIcao, 456, GeoPoint(30.10, 45.30));
             break;
         }
 
         if (!m_arrivalUnderTest.ptr && !m_anotherArrival.ptr && m_secondsToTouchdown > 0 && m_secondsToTouchdown < 360)
         {
-            m_anotherArrival = addArrivalOnFinal("A320", 789, m_secondsToTouchdown);
+            m_anotherArrival = addArrivalOnFinal(m_otherTrafficTypeIcao, 789, m_secondsToTouchdown);
             m_board.arrivalsLine.push_back(make_shared<FlightStrip>(m_anotherArrival.ptr, noopListener));
         }
     }
@@ -760,4 +766,3 @@ public:
     }
 
 };
-

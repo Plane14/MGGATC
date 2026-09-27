@@ -1,0 +1,12 @@
+# Curated sample cached from GlobalMilitary.net airbase listings/pages for randomized military demo traffic.
+icao,name,country,operation,primary_model_icao,secondary_model_icao,tertiary_model_icao
+KLSV,Nellis Air Force Base,United States,FIGHTER,F16,F35,H60
+ETAR,Ramstein Air Base,Germany,TRANSPORT,C17,C130,H60
+KLTS,Altus Air Force Base,United States,TRANSPORT,C17,C130,A400
+LSMP,Payerne Air Base,Switzerland,FIGHTER,F18,F5,HAWK
+LSMM,Meiringen Air Base,Switzerland,FIGHTER,F18,F5,HAWK
+FALM,AFB Makhado,South Africa,FIGHTER,F16,HAWK,B412
+FAHS,AFB Hoedspruit,South Africa,HELICOPTER,H60,B412,C130
+FAWK,AFB Waterkloof,South Africa,TRANSPORT,C130,C212,H60
+FADN,AFB Durban,South Africa,HELICOPTER,B412,H60,C208
+LRSM,86th Air Base,Romania,FIGHTER,F16,H60,C130
