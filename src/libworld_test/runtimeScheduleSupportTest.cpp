@@ -142,6 +142,49 @@ TEST(RuntimeScheduleSupportTest, classifiesGroundOriginAsDepartureOnly) {
     EXPECT_EQ("KLAS", candidate.destinationIcao);
 }
 
+TEST(RuntimeScheduleSupportTest, parsesAirNavRadarScheduleCandidates) {
+    const auto candidates = parseAirNavRadarScheduleResponse(R"json(
+        {
+            "candidates": [
+                {
+                    "kind": "arrival",
+                    "counterpart_icao": "LEBL",
+                    "call_sign": "IBE3166",
+                    "flight_no": "3166",
+                    "airline_icao": "IBE",
+                    "registration": "EC-MOU",
+                    "model_icao": "A320",
+                    "sequence": 0
+                },
+                {
+                    "kind": "departure",
+                    "counterpart_icao": "LEPA",
+                    "flight_no": "UX6071",
+                    "registration": "EC-NHM",
+                    "model_icao": "B738",
+                    "sequence": 1
+                }
+            ]
+        }
+    )json", "LEMD", GeoPoint(40.4722, -3.5608));
+
+    ASSERT_EQ(2, candidates.size());
+
+    EXPECT_EQ(CandidateType::ArrivalOnly, candidates[0].type);
+    EXPECT_EQ("LEBL", candidates[0].originIcao);
+    EXPECT_EQ("LEMD", candidates[0].destinationIcao);
+    EXPECT_EQ("IBE3166", candidates[0].aircraft.callSign);
+    EXPECT_EQ("A320", candidates[0].aircraft.modelIcao);
+    EXPECT_EQ("IBE", candidates[0].route.airlineIcao);
+
+    EXPECT_EQ(CandidateType::DepartureOnly, candidates[1].type);
+    EXPECT_EQ("LEMD", candidates[1].originIcao);
+    EXPECT_EQ("LEPA", candidates[1].destinationIcao);
+    EXPECT_EQ("UX6071", candidates[1].aircraft.callSign);
+    EXPECT_TRUE(candidates[1].aircraft.onGround);
+    EXPECT_EQ("UX6071", candidates[1].route.flightNo);
+}
+
 TEST(RuntimeScheduleSupportTest, parsesMilitaryAirbasesCsv) {
     stringstream csv(R"csv(
 icao,name,country,operation,primary_model_icao,secondary_model_icao,tertiary_model_icao

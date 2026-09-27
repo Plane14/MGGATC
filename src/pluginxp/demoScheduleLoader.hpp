@@ -106,6 +106,18 @@ public:
 
         if (!loadedLiveSchedules)
         {
+            try
+            {
+                loadedLiveSchedules = tryLoadAirNavRadarSchedules(loadFactor);
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog("SCHEDL|AirNavRadar runtime schedule load failed: %s", e.what());
+            }
+        }
+
+        if (!loadedLiveSchedules)
+        {
             m_host->writeLog("SCHEDL|Falling back to bundled demo schedules");
             initDemoSchedules(loadFactor, m_world->currentTime() + 200, m_world->currentTime() + 30);
         }
@@ -244,7 +256,7 @@ private:
     }
 #endif
 
-    string executeCurl(const vector<string>& arguments) const
+    string executeCommand(const vector<string>& arguments) const
     {
 #if IBM
         SECURITY_ATTRIBUTES securityAttributes;
@@ -327,7 +339,7 @@ private:
 
         if (exitCode != 0)
         {
-            throw runtime_error("curl exited with a non-zero status");
+            throw runtime_error(arguments.at(0) + " exited with a non-zero status");
         }
 
         return output;
@@ -378,7 +390,7 @@ private:
         waitpid(processId, &exitStatus, 0);
         if (!WIFEXITED(exitStatus) || WEXITSTATUS(exitStatus) != 0)
         {
-            throw runtime_error("curl exited with a non-zero status");
+            throw runtime_error(arguments.at(0) + " exited with a non-zero status");
         }
 
         return output;
@@ -387,13 +399,53 @@ private:
 
     string downloadTextFromUrl(const string& url) const
     {
-        return executeCurl({
+        return executeCommand({
             "curl",
             "-LfsS",
             "--connect-timeout", "5",
             "--max-time", "15",
             url
         });
+    }
+
+    string executeFirstSuccessfulCommand(const vector<vector<string>>& commandVariants) const
+    {
+        string lastError = "No command variants available";
+        for (const auto& arguments : commandVariants)
+        {
+            if (arguments.empty())
+            {
+                continue;
+            }
+
+            try
+            {
+                return executeCommand(arguments);
+            }
+            catch (const exception& e)
+            {
+                lastError = string(arguments.at(0)) + ": " + e.what();
+            }
+        }
+
+        throw runtime_error(lastError);
+    }
+
+    string scrapeAirNavRadarSchedules() const
+    {
+        const string scriptPath = m_host->getResourceFilePath({ "Resources", "airnavradar_airport_schedules.py" });
+        const string airportIcao = runtime_schedule::upper(m_airport->header().icao());
+#if IBM
+        return executeFirstSuccessfulCommand({
+            { "py", "-3", scriptPath, airportIcao },
+            { "python", scriptPath, airportIcao }
+        });
+#else
+        return executeFirstSuccessfulCommand({
+            { "python3", scriptPath, airportIcao },
+            { "python", scriptPath, airportIcao }
+        });
+#endif
     }
 
     string resolveCallSignPrefix(const AircraftOption& aircraftOption, const string& airlineIcao) const
@@ -604,6 +656,14 @@ private:
         return runtime_schedule::parsePointResponse(downloadTextFromUrl(buildPointLookupUrl()));
     }
 
+    vector<runtime_schedule::LiveScheduleCandidate> fetchAirNavRadarCandidates() const
+    {
+        return runtime_schedule::parseAirNavRadarScheduleResponse(
+            scrapeAirNavRadarSchedules(),
+            m_airport->header().icao(),
+            m_airport->header().datum());
+    }
+
     AircraftOption selectAircraftOption(
         const vector<AircraftOption>& aircraftOptions,
         shared_ptr<ParkingStand> gate,
@@ -707,107 +767,43 @@ private:
         return gate;
     }
 
-    bool tryLoadRealSchedules(float loadFactor)
+    bool loadLiveScheduleCandidates(
+        const string& sourceLabel,
+        vector<runtime_schedule::LiveScheduleCandidate> candidates,
+        int sourceCandidateCount,
+        const vector<AircraftOption>& aircraftOptions,
+        const vector<shared_ptr<ParkingStand>>& usableGates,
+        float loadFactor,
+        bool preserveCandidateOrder = false)
     {
-        vector<AircraftOption> aircraftOptions = findAvailableAircraftOptions();
-        if (aircraftOptions.empty())
-        {
-            m_host->writeLog("SCHEDL|No available CSL aircraft options found; cannot load real schedules");
-            return false;
-        }
-
-        vector<shared_ptr<ParkingStand>> usableGates = findUsableGatesForAIFlights();
-        if (usableGates.empty())
-        {
-            m_host->writeLog("SCHEDL|No usable passenger gates found; cannot load real schedules");
-            return false;
-        }
-
         int requestedCount = max(1, (int)(usableGates.size() * loadFactor));
-        vector<runtime_schedule::LiveAircraft> liveAircraft = fetchLiveAircraft();
-        if (liveAircraft.empty())
+
+        if (!preserveCandidateOrder)
         {
-            m_host->writeLog("SCHEDL|adsb.lol returned no live aircraft for airport[%s]", m_airport->header().icao().c_str());
-            return false;
-        }
-
-        const auto& airportLocation = m_airport->header().datum();
-        stable_sort(liveAircraft.begin(), liveAircraft.end(), [&airportLocation](const runtime_schedule::LiveAircraft& left, const runtime_schedule::LiveAircraft& right) {
-            bool leftGround = runtime_schedule::isGroundState(left) && runtime_schedule::isAtAirport(airportLocation, left);
-            bool rightGround = runtime_schedule::isGroundState(right) && runtime_schedule::isAtAirport(airportLocation, right);
-            if (leftGround != rightGround)
-            {
-                return leftGround > rightGround;
-            }
-
-            return GeoMath::getDistanceMeters(airportLocation, left.location) < GeoMath::getDistanceMeters(airportLocation, right.location);
-        });
-
-        vector<runtime_schedule::LiveAircraft> routeLookupAircraft;
-        set<string> seenCallSigns;
-        int routeLookupLimit = min((int)liveAircraft.size(), max(8, requestedCount * 3));
-        for (const auto& aircraft : liveAircraft)
-        {
-            if (seenCallSigns.find(aircraft.callSign) != seenCallSigns.end())
-            {
-                continue;
-            }
-
-            seenCallSigns.insert(aircraft.callSign);
-            routeLookupAircraft.push_back(aircraft);
-            if ((int)routeLookupAircraft.size() >= routeLookupLimit)
-            {
-                break;
-            }
-        }
-
-        vector<runtime_schedule::LiveScheduleCandidate> candidates;
-        for (const auto& aircraft : routeLookupAircraft)
-        {
-            try
-            {
-                runtime_schedule::RouteData route = fetchLiveRoute(aircraft);
-                runtime_schedule::LiveScheduleCandidate candidate;
-                if (runtime_schedule::tryBuildCandidate(m_airport->header().icao(), airportLocation, aircraft, route, candidate))
+            const auto candidateTypeRank = [](runtime_schedule::CandidateType type)->int {
+                switch (type)
                 {
-                    candidates.push_back(candidate);
+                case runtime_schedule::CandidateType::Turnaround: return 0;
+                case runtime_schedule::CandidateType::DepartureOnly: return 1;
+                case runtime_schedule::CandidateType::ArrivalOnly: return 2;
+                default: return 3;
                 }
-            }
-            catch (const exception& e)
-            {
-                m_host->writeLog("SCHEDL|Skipping live route [%s]: %s", aircraft.callSign.c_str(), e.what());
-            }
+            };
+
+            stable_sort(candidates.begin(), candidates.end(), [candidateTypeRank](const runtime_schedule::LiveScheduleCandidate& left, const runtime_schedule::LiveScheduleCandidate& right) {
+                if (candidateTypeRank(left.type) != candidateTypeRank(right.type))
+                {
+                    return candidateTypeRank(left.type) < candidateTypeRank(right.type);
+                }
+
+                if (left.type == runtime_schedule::CandidateType::DepartureOnly && right.type == runtime_schedule::CandidateType::DepartureOnly)
+                {
+                    return left.aircraft.groundSpeedKt > right.aircraft.groundSpeedKt;
+                }
+
+                return left.distanceMeters < right.distanceMeters;
+            });
         }
-
-        if (candidates.empty())
-        {
-            m_host->writeLog("SCHEDL|No usable adsb.lol schedule candidates found at airport[%s]", m_airport->header().icao().c_str());
-            return false;
-        }
-
-        const auto candidateTypeRank = [](runtime_schedule::CandidateType type)->int {
-            switch (type)
-            {
-            case runtime_schedule::CandidateType::Turnaround: return 0;
-            case runtime_schedule::CandidateType::DepartureOnly: return 1;
-            case runtime_schedule::CandidateType::ArrivalOnly: return 2;
-            default: return 3;
-            }
-        };
-
-        stable_sort(candidates.begin(), candidates.end(), [candidateTypeRank](const runtime_schedule::LiveScheduleCandidate& left, const runtime_schedule::LiveScheduleCandidate& right) {
-            if (candidateTypeRank(left.type) != candidateTypeRank(right.type))
-            {
-                return candidateTypeRank(left.type) < candidateTypeRank(right.type);
-            }
-
-            if (left.type == runtime_schedule::CandidateType::DepartureOnly && right.type == runtime_schedule::CandidateType::DepartureOnly)
-            {
-                return left.aircraft.groundSpeedKt > right.aircraft.groundSpeedKt;
-            }
-
-            return left.distanceMeters < right.distanceMeters;
-        });
 
         vector<AssignedLiveSchedule> acceptedSchedules;
         vector<shared_ptr<ParkingStand>> availableGates = usableGates;
@@ -974,15 +970,140 @@ private:
             }
             catch (const exception& e)
             {
-                m_host->writeLog("SCHEDL|Failed to add adsb.lol schedule for [%s]: %s", liveAircraft.callSign.c_str(), e.what());
+                m_host->writeLog(
+                    "SCHEDL|Failed to add %s schedule for [%s]: %s",
+                    sourceLabel.c_str(),
+                    liveAircraft.callSign.c_str(),
+                    e.what());
             }
         }
 
         m_host->writeLog(
-            "SCHEDL|Loaded [%d] adsb.lol schedule slots from [%d] live aircraft candidates",
+            "SCHEDL|Loaded [%d] %s schedule slots from [%d] candidates",
             acceptedSchedules.size(),
-            liveAircraft.size());
+            sourceLabel.c_str(),
+            sourceCandidateCount);
         return true;
+    }
+
+    bool tryLoadRealSchedules(float loadFactor)
+    {
+        vector<AircraftOption> aircraftOptions = findAvailableAircraftOptions();
+        if (aircraftOptions.empty())
+        {
+            m_host->writeLog("SCHEDL|No available CSL aircraft options found; cannot load real schedules");
+            return false;
+        }
+
+        vector<shared_ptr<ParkingStand>> usableGates = findUsableGatesForAIFlights();
+        if (usableGates.empty())
+        {
+            m_host->writeLog("SCHEDL|No usable passenger gates found; cannot load real schedules");
+            return false;
+        }
+
+        int requestedCount = max(1, (int)(usableGates.size() * loadFactor));
+        vector<runtime_schedule::LiveAircraft> liveAircraft = fetchLiveAircraft();
+        if (liveAircraft.empty())
+        {
+            m_host->writeLog("SCHEDL|adsb.lol returned no live aircraft for airport[%s]", m_airport->header().icao().c_str());
+            return false;
+        }
+
+        const auto& airportLocation = m_airport->header().datum();
+        stable_sort(liveAircraft.begin(), liveAircraft.end(), [&airportLocation](const runtime_schedule::LiveAircraft& left, const runtime_schedule::LiveAircraft& right) {
+            bool leftGround = runtime_schedule::isGroundState(left) && runtime_schedule::isAtAirport(airportLocation, left);
+            bool rightGround = runtime_schedule::isGroundState(right) && runtime_schedule::isAtAirport(airportLocation, right);
+            if (leftGround != rightGround)
+            {
+                return leftGround > rightGround;
+            }
+
+            return GeoMath::getDistanceMeters(airportLocation, left.location) < GeoMath::getDistanceMeters(airportLocation, right.location);
+        });
+
+        vector<runtime_schedule::LiveAircraft> routeLookupAircraft;
+        set<string> seenCallSigns;
+        int routeLookupLimit = min((int)liveAircraft.size(), max(8, requestedCount * 3));
+        for (const auto& aircraft : liveAircraft)
+        {
+            if (seenCallSigns.find(aircraft.callSign) != seenCallSigns.end())
+            {
+                continue;
+            }
+
+            seenCallSigns.insert(aircraft.callSign);
+            routeLookupAircraft.push_back(aircraft);
+            if ((int)routeLookupAircraft.size() >= routeLookupLimit)
+            {
+                break;
+            }
+        }
+
+        vector<runtime_schedule::LiveScheduleCandidate> candidates;
+        for (const auto& aircraft : routeLookupAircraft)
+        {
+            try
+            {
+                runtime_schedule::RouteData route = fetchLiveRoute(aircraft);
+                runtime_schedule::LiveScheduleCandidate candidate;
+                if (runtime_schedule::tryBuildCandidate(m_airport->header().icao(), airportLocation, aircraft, route, candidate))
+                {
+                    candidates.push_back(candidate);
+                }
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog("SCHEDL|Skipping live route [%s]: %s", aircraft.callSign.c_str(), e.what());
+            }
+        }
+
+        if (candidates.empty())
+        {
+            m_host->writeLog("SCHEDL|No usable adsb.lol schedule candidates found at airport[%s]", m_airport->header().icao().c_str());
+            return false;
+        }
+
+        return loadLiveScheduleCandidates(
+            "adsb.lol",
+            candidates,
+            (int)liveAircraft.size(),
+            aircraftOptions,
+            usableGates,
+            loadFactor);
+    }
+
+    bool tryLoadAirNavRadarSchedules(float loadFactor)
+    {
+        vector<AircraftOption> aircraftOptions = findAvailableAircraftOptions();
+        if (aircraftOptions.empty())
+        {
+            m_host->writeLog("SCHEDL|No available CSL aircraft options found; cannot load AirNavRadar schedules");
+            return false;
+        }
+
+        vector<shared_ptr<ParkingStand>> usableGates = findUsableGatesForAIFlights();
+        if (usableGates.empty())
+        {
+            m_host->writeLog("SCHEDL|No usable passenger gates found; cannot load AirNavRadar schedules");
+            return false;
+        }
+
+        vector<runtime_schedule::LiveScheduleCandidate> candidates = fetchAirNavRadarCandidates();
+        if (candidates.empty())
+        {
+            m_host->writeLog("SCHEDL|AirNavRadar returned no usable schedule candidates for airport[%s]", m_airport->header().icao().c_str());
+            return false;
+        }
+
+        return loadLiveScheduleCandidates(
+            "AirNavRadar",
+            candidates,
+            (int)candidates.size(),
+            aircraftOptions,
+            usableGates,
+            loadFactor,
+            true);
     }
 
     void initDemoSchedules(float loadFactor, time_t firstDepartureTime, time_t firstArrivalTime)
