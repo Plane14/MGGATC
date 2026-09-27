@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <functional>
+#include <unordered_map>
 #include "libworld.h"
 #include "aircraftPerformanceProfileService.hpp"
 #include "intentFactory.hpp"
@@ -214,6 +215,7 @@ namespace world
         shared_ptr<TestTtsService> m_textToSpeechService;
         vector<shared_ptr<TestAIController>> m_createdAIControllers;
         vector<shared_ptr<TestAIPilot>> m_createdAIPilots;
+        unordered_map<string, string> m_fileContentsByPath;
         shared_ptr<World> m_world;
         bool m_quiet;
         chrono::milliseconds m_timeForLog;
@@ -336,12 +338,21 @@ namespace world
         }
         shared_ptr<istream> openFileForRead(const string& filePath) override
         {
-            return shared_ptr<istream>(new stringstream());
+            auto found = m_fileContentsByPath.find(filePath);
+            if (found == m_fileContentsByPath.end())
+            {
+                throw runtime_error("TestHostServices::openFileForRead: file not registered: " + filePath);
+            }
+            return shared_ptr<istream>(new stringstream(found->second));
         }
         void showMessageBox(const string& title, const char *format, ...) override
         {
         }
     public:
+        void registerFileContents(const string& filePath, const string& content)
+        {
+            m_fileContentsByPath[filePath] = content;
+        }
         void useWorld(shared_ptr<World> _world)
         {
             m_world = _world;

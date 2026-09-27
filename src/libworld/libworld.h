@@ -542,6 +542,48 @@ namespace world
         void calculateBounds();
     };
 
+    struct AirportFlowConditions
+    {
+        float windDirectionTrue = 0.0f;
+        float windSpeedKt = 0.0f;
+        float ceilingFeet = 99999.0f;
+        float visibilitySm = 99.0f;
+        int localTimeMinutes = 0;
+    };
+
+    struct AirportTrafficFlowRunwayUse
+    {
+        string runwayName;
+        bool arrivals = false;
+        bool departures = false;
+    };
+
+    struct AirportTrafficFlow
+    {
+        string name;
+        bool hasWindRule = false;
+        int minWindDirection = 0;
+        int maxWindDirection = 0;
+        float maxWindSpeedKt = 0.0f;
+        bool hasCeilingRule = false;
+        float minCeilingFeet = 0.0f;
+        bool hasVisibilityRule = false;
+        float minVisibilitySm = 0.0f;
+        bool hasTimeRule = false;
+        int startTimeMinutes = 0;
+        int endTimeMinutes = 0;
+        vector<AirportTrafficFlowRunwayUse> runwayUses;
+    public:
+        bool matches(const AirportFlowConditions& conditions) const;
+    };
+
+    class AirportFlowProvider
+    {
+    public:
+        virtual ~AirportFlowProvider() = default;
+        virtual AirportFlowConditions getAirportFlowConditions(const Airport& airport) = 0;
+    };
+
     class World
     {
     private:
@@ -1704,6 +1746,11 @@ namespace world
             string m_toNavaid;
             float m_targetAltitude;
             float m_targetSpeed;
+            GeoPoint m_targetPoint;
+            bool m_hasTargetPoint;
+            float m_courseHeading;
+            bool m_hasCourseHeading;
+            string m_pathTerm;
         public:
             Leg(
                 LegType _type,
@@ -1711,13 +1758,23 @@ namespace world
                 const string& _fromNavaid,
                 const string& _toNavaid,
                 float _targetAltitude,
-                float _targetSpeed
+                float _targetSpeed,
+                const GeoPoint& _targetPoint = GeoPoint::empty,
+                bool _hasTargetPoint = false,
+                float _courseHeading = 0.0f,
+                bool _hasCourseHeading = false,
+                const string& _pathTerm = ""
             ) : m_type(_type),
                 m_geometry(_geometry),
                 m_fromNavaid(_fromNavaid),
                 m_toNavaid(_toNavaid),
                 m_targetAltitude(_targetAltitude),
-                m_targetSpeed(_targetSpeed)
+                m_targetSpeed(_targetSpeed),
+                m_targetPoint(_targetPoint),
+                m_hasTargetPoint(_hasTargetPoint),
+                m_courseHeading(_courseHeading),
+                m_hasCourseHeading(_hasCourseHeading),
+                m_pathTerm(_pathTerm)
             {
             }
         public:
@@ -1727,6 +1784,11 @@ namespace world
             const string& toNavaid() const { return m_toNavaid; }
             float targetAltitude() const { return m_targetAltitude; }
             float targetSpeed() const { return m_targetSpeed; }
+            const GeoPoint& targetPoint() const { return m_targetPoint; }
+            bool hasTargetPoint() const { return m_hasTargetPoint; }
+            float courseHeading() const { return m_courseHeading; }
+            bool hasCourseHeading() const { return m_hasCourseHeading; }
+            const string& pathTerm() const { return m_pathTerm; }
         };
         
         class Cursor
@@ -1794,6 +1856,40 @@ namespace world
         const string& flightNo() const { return m_flightNo; }
         const string& callsign() const { return m_callsign; }
         const vector<shared_ptr<Leg>>& legs() const { return m_legs; }
+        shared_ptr<Leg> firstLegOfType(LegType type) const
+        {
+            for (const auto& leg : m_legs)
+            {
+                if (leg && leg->type() == type)
+                {
+                    return leg;
+                }
+            }
+            return nullptr;
+        }
+        vector<shared_ptr<Leg>> legsOfType(LegType type) const
+        {
+            vector<shared_ptr<Leg>> result;
+            for (const auto& leg : m_legs)
+            {
+                if (leg && leg->type() == type)
+                {
+                    result.push_back(leg);
+                }
+            }
+            return result;
+        }
+        shared_ptr<Leg> firstRouteLeg() const
+        {
+            for (const auto& leg : m_legs)
+            {
+                if (leg && leg->type() != LegType::GoAround)
+                {
+                    return leg;
+                }
+            }
+            return nullptr;
+        }
     public:
         void setDepartureAirportIcao(const string& icao) { m_departureAirportIcao = icao; }
         void setDepartureGate(const string& name) { m_departureGate = name; }
@@ -1809,6 +1905,13 @@ namespace world
         void setAirlineIcao(const string& icao) { m_airlineIcao = icao; }
         void setFlightNo(const string& value) { m_flightNo = value; }
         void setCallsign(const string& name) { m_callsign = name; }
+        void addLeg(shared_ptr<Leg> leg)
+        {
+            if (leg)
+            {
+                m_legs.push_back(leg);
+            }
+        }
     };
 
     class Flight : 
@@ -1972,6 +2075,7 @@ namespace world
         shared_ptr<TaxiNet> m_taxiNet;
         shared_ptr<ControlFacility> m_tower;
         vector<vector<shared_ptr<Runway>>> m_parallelRunwayGroups;
+        vector<AirportTrafficFlow> m_trafficFlows;
         shared_ptr<MutableState> m_mutableState;
     public:
         Airport(const Header& _header) : 
@@ -1988,6 +2092,7 @@ namespace world
         bool isAdvisoryOnly() const { return m_tower && m_tower->isAdvisoryOnly(); }
         bool hasParallelRunways() const { return m_parallelRunwayGroups.size() > 0; }
         int parallelRunwayGroupCount() const { return m_parallelRunwayGroups.size(); }
+        const vector<AirportTrafficFlow>& trafficFlows() const { return m_trafficFlows; }
         const vector<string>& activeDepartureRunways() const { return m_mutableState->activeDepartureRunways; }
         const vector<string>& activeArrivalRunways() const { return m_mutableState->activeArrivalRunways; }
         bool isRunwayActive(const string& runwayName) const;
@@ -2046,6 +2151,12 @@ namespace world
             return getControllerPositionOrThrow(ControllerPosition::Type::Approach, location);
         }
     public:
+        void setTrafficFlows(const vector<AirportTrafficFlow>& flows) { m_trafficFlows = flows; }
+        const AirportTrafficFlow* findMatchingTrafficFlow(const AirportFlowConditions& conditions) const;
+        bool selectRunwaysForFlowConditions(
+            const AirportFlowConditions& conditions,
+            vector<string>& departureRunways,
+            vector<string>& arrivalRunways) const;
         void selectActiveRunways();
         void selectArrivalAndDepartureTaxiways();
     private:
@@ -2515,6 +2626,15 @@ namespace world
                 //     return servicePtr.getAs<TService>();
                 // }
                 // throw runtime_error("Service not found in container: " + typeKey);
+            }
+            template<class TService>
+            shared_ptr<TService> tryGet()
+            {
+                string typeKey(typeid(TService).name());
+                auto found = m_serviceByTypeKey.find(typeKey);
+                return found != m_serviceByTypeKey.end()
+                    ? found->second.getAs<TService>()
+                    : nullptr;
             }
             template<class TService>
             void use(shared_ptr<TService> service)

@@ -52,6 +52,21 @@ namespace ai
                 throw runtime_error("Cannot select active runways: not a local controller or no airport");
             }
 
+            auto airportFlowProvider = host()->services().tryGet<AirportFlowProvider>();
+            if (airportFlowProvider &&
+                airport->selectRunwaysForFlowConditions(
+                    airportFlowProvider->getAirportFlowConditions(*airport),
+                    departure,
+                    arrival))
+            {
+                host()->writeLog(
+                    "AICONT|Selected navdata traffic flow with departure[%d] arrival[%d] runways",
+                    (int)departure.size(),
+                    (int)arrival.size());
+                createActiveRunwayMutexes();
+                return;
+            }
+
             if (airport->hasParallelRunways())
             {
                 const auto& longestGroup = airport->findLongestParallelRunwayGroup();

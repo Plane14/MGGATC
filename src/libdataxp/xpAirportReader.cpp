@@ -2,6 +2,7 @@
 // This file is part of AT&C project which simulates virtual world of air traffic and ATC.
 // Code licensing terms are available at https://github.com/felix-b/atc/blob/master/LICENSE
 // 
+#include <cctype>
 #include <memory>
 #include <iostream>
 #include <utility>
@@ -79,6 +80,7 @@ XPAirportReader::XPAirportReader(
     m_unparsedLineCode(_unparsedLineCode),
     m_nextEdgeId(1001),
     m_nextParkingStandId(301),
+    m_activeTrafficFlowIndex(-1),
     m_datumLatitude(DATUM_UNSPECIFIED),
     m_datumLongitude(DATUM_UNSPECIFIED),
     m_advisoryFrequencyKhz(0),
@@ -141,6 +143,7 @@ shared_ptr<Airport> XPAirportReader::assembleAirportOrThrow()
         m_taxiEdges,
         tower, 
         m_airspace);
+    airport->setTrafficFlows(m_trafficFlows);
 
     return airport;
 }
@@ -271,6 +274,28 @@ bool XPAirportReader::rootContextParser(int lineCode, istream& input)
     case 100:
         parseRunway100(input);
         break;
+    case 1000:
+        if (m_headerWasRead)
+        {
+            parseTrafficFlow1000(input);
+        }
+        else
+        {
+            skipToNextLine(input);
+        }
+        break;
+    case 1001:
+        parseTrafficFlowWind1001(input);
+        break;
+    case 1002:
+        parseTrafficFlowCeiling1002(input);
+        break;
+    case 1003:
+        parseTrafficFlowVisibility1003(input);
+        break;
+    case 1004:
+        parseTrafficFlowTime1004(input);
+        break;
     case 1201:
         parseTaxiNode1201(input);
         break;
@@ -285,6 +310,9 @@ bool XPAirportReader::rootContextParser(int lineCode, istream& input)
         break;
     case 1302:
         parseMetadata1302(input);
+        break;
+    case 1110:
+        parseTrafficFlowRunwayUse1110(input);
         break;
     default:
         if (isControlFrequencyLine(lineCode))
@@ -342,6 +370,117 @@ void XPAirportReader::parseRunway100(istream& input)
     auto runway = make_shared<Runway>(end1, end2, widthMeters);
     
     m_runways.push_back(runway);
+}
+
+void XPAirportReader::parseTrafficFlow1000(istream& input)
+{
+    AirportTrafficFlow trafficFlow;
+    trafficFlow.name = readToEndOfLine(input);
+    m_trafficFlows.push_back(trafficFlow);
+    m_activeTrafficFlowIndex = (int)m_trafficFlows.size() - 1;
+}
+
+void XPAirportReader::parseTrafficFlowWind1001(istream& input)
+{
+    auto flow = currentTrafficFlow();
+    if (!flow)
+    {
+        skipToNextLine(input);
+        return;
+    }
+
+    string icao;
+    input >> icao >> flow->minWindDirection >> flow->maxWindDirection >> flow->maxWindSpeedKt;
+    flow->hasWindRule = true;
+    readToEndOfLine(input);
+}
+
+void XPAirportReader::parseTrafficFlowCeiling1002(istream& input)
+{
+    auto flow = currentTrafficFlow();
+    if (!flow)
+    {
+        skipToNextLine(input);
+        return;
+    }
+
+    string icao;
+    input >> icao >> flow->minCeilingFeet;
+    flow->hasCeilingRule = true;
+    readToEndOfLine(input);
+}
+
+void XPAirportReader::parseTrafficFlowVisibility1003(istream& input)
+{
+    auto flow = currentTrafficFlow();
+    if (!flow)
+    {
+        skipToNextLine(input);
+        return;
+    }
+
+    string icao;
+    input >> icao >> flow->minVisibilitySm;
+    flow->hasVisibilityRule = true;
+    readToEndOfLine(input);
+}
+
+void XPAirportReader::parseTrafficFlowTime1004(istream& input)
+{
+    auto flow = currentTrafficFlow();
+    if (!flow)
+    {
+        skipToNextLine(input);
+        return;
+    }
+
+    string token1 = readFirstToken(input);
+    string token2 = readFirstToken(input);
+    string token3 = readFirstToken(input);
+    if (token1.empty() || token2.empty())
+    {
+        return;
+    }
+
+    bool firstTokenIsDigit = isdigit((unsigned char)token1[0]) != 0;
+    const string& startToken = firstTokenIsDigit ? token1 : token2;
+    const string& endToken = firstTokenIsDigit ? token2 : token3;
+    if (endToken.empty())
+    {
+        return;
+    }
+
+    flow->startTimeMinutes = stoi(startToken);
+    flow->endTimeMinutes = stoi(endToken);
+    flow->hasTimeRule = true;
+    readToEndOfLine(input);
+}
+
+void XPAirportReader::parseTrafficFlowRunwayUse1110(istream& input)
+{
+    auto flow = currentTrafficFlow();
+    if (!flow)
+    {
+        skipToNextLine(input);
+        return;
+    }
+
+    string runwayName;
+    string frequency;
+    string operationTypes;
+    string categories;
+    input >> runwayName >> frequency >> operationTypes >> categories;
+
+    AirportTrafficFlowRunwayUse runwayUse = {
+        runwayName,
+        operationTypes.find("arrival") != string::npos,
+        operationTypes.find("departure") != string::npos
+    };
+    if (runwayUse.arrivals || runwayUse.departures)
+    {
+        flow->runwayUses.push_back(runwayUse);
+    }
+    readToEndOfLine(input);
 }
 
 void XPAirportReader::parseTaxiNode1201(istream& input)
@@ -770,6 +909,13 @@ bool XPAirportReader::invokeFilterCallback()
 {
     Airport::Header header(m_icao, m_name, GeoPoint(m_datumLatitude, m_datumLongitude), m_elevation);
     return m_onFilterAirport(header);
+}
+
+AirportTrafficFlow* XPAirportReader::currentTrafficFlow()
+{
+    return m_activeTrafficFlowIndex >= 0 && m_activeTrafficFlowIndex < (int)m_trafficFlows.size()
+        ? &m_trafficFlows[m_activeTrafficFlowIndex]
+        : nullptr;
 }
 
 XPAptDatReader::XPAptDatReader(shared_ptr<HostServices> _host) :

@@ -181,11 +181,37 @@ namespace ai
                 ControllerPosition::Type::Departure,
                 flight->aircraft()->location());
 
+            float effectiveInitialHeading = initialHeading;
+            const Runway::End* departureRunwayEnd = nullptr;
+            try
+            {
+                auto runway = airport->getRunwayOrThrow(flight->plan()->departureRunway());
+                departureRunwayEnd = &runway->getEndOrThrow(flight->plan()->departureRunway());
+            }
+            catch (...)
+            {
+            }
+
+            auto firstRouteLeg = flight->plan()->firstRouteLeg();
+            if (firstRouteLeg)
+            {
+                if (departureRunwayEnd && firstRouteLeg->hasTargetPoint())
+                {
+                    effectiveInitialHeading = GeoMath::getHeadingFromPoints(
+                        departureRunwayEnd->centerlinePoint().geo(),
+                        firstRouteLeg->targetPoint());
+                }
+                else if (firstRouteLeg->hasCourseHeading())
+                {
+                    effectiveInitialHeading = firstRouteLeg->courseHeading();
+                }
+            }
+
             return shared_ptr<TakeoffClearance>(new TakeoffClearance(
                 header,
                 flight->plan()->departureRunway(),
                 immediate,
-                initialHeading,
+                effectiveInitialHeading,
                 departure ? departure->frequency()->khz() : 0
             ));
         }
