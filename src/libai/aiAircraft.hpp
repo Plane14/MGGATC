@@ -16,6 +16,7 @@
 #include "maneuverFactory.hpp"
 #include "intentTypes.hpp"
 #include "intentFactory.hpp"
+#include "trafficPattern.hpp"
 
 #define METERS_IN_NAUTICAL_MILE 1852.0
 #define MICROSECONDS_IN_HOUR 3600000000.0
@@ -108,7 +109,30 @@ namespace ai
 
         void setOnFinal(const Runway::End& runwayEnd) override
         {
+            auto flightPtr = flight().lock();
             const auto& profile = host()->services().get<AircraftPerformanceProfileService>()->resolve(modelIcao());
+            auto arrivalAirport = flightPtr
+                ? host()->getWorld()->getAirport(flightPtr->plan()->arrivalAirportIcao())
+                : nullptr;
+
+            if (traffic_pattern::shouldUseAdvisoryPattern(arrivalAirport, flightPtr))
+            {
+                const auto geometry = traffic_pattern::buildLeftPattern(profile, runwayEnd, category());
+
+                setAltitude(Altitude::msl(runwayEnd.elevationFeet() + geometry.patternAltitudeFeetAgl));
+                setGroundSpeedKt(geometry.downwindSpeedKt);
+                setVerticalSpeedFpm(0);
+                setFlapState(0);
+                setGearState(0);
+                setLights(LightBits::BeaconLandingNavStrobe);
+                setAttitude(AircraftAttitude(geometry.downwindHeading, 0.0f, 0.0f));
+
+                m_locationTimespamp = host()->getWorld()->timestamp();
+                setLocation(geometry.downwindEntry);
+                setManeuver(flightPtr->pilot()->getFinalToGate(runwayEnd));
+                return;
+            }
+
             float minutesToThreshold = (float)performance_model::calcFinalApproachMinutes(profile);
             float descentSpeedFpm = (float)max(500, profile.approachRodFpm);
             float groundSpeedKt = (float)performance_model::calcFinalApproachGroundSpeedKt(profile);
@@ -145,7 +169,7 @@ namespace ai
             //     << "verticalSpeed=" << m_verticalSpeedFpm;
             // m_host->writeLog(log.str().c_str());
 
-            setManeuver(flight().lock()->pilot()->getFinalToGate(runwayEnd));
+            setManeuver(flightPtr->pilot()->getFinalToGate(runwayEnd));
         }
 
         void progressTo(chrono::microseconds timestamp) override

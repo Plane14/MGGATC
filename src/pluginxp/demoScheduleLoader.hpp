@@ -50,6 +50,16 @@ private:
         string modelIcao;
         string airlineIcao;
         string callSignPrefix;
+        Flight::RulesType rules = Flight::RulesType::IFR;
+    };
+
+    enum class SpecialTrafficRole
+    {
+        GeneralAviation,
+        Rotorcraft,
+        MilitaryFighter,
+        MilitaryTransport,
+        MilitaryRotorcraft
     };
 
     struct AssignedLiveSchedule
@@ -100,6 +110,11 @@ public:
             initDemoSchedules(loadFactor, m_world->currentTime() + 200, m_world->currentTime() + 30);
         }
 
+        initSpecialSchedules(
+            min(loadFactor, 0.5f),
+            m_world->currentTime() + 150,
+            m_world->currentTime() + 45);
+
         m_host->writeLog(
             "SCHEDL|Loaded [%d] AI flights at airport[%s]",
             m_world->flights().size(),
@@ -149,8 +164,17 @@ private:
         const auto& departure = m_airport->activeDepartureRunways();
         const auto& arrival = m_airport->activeArrivalRunways();
 
-        departureRunway = !departure.empty() ? departure.at(0) : "";
-        arrivalRunway1 = !arrival.empty() ? arrival.at(0) : "";
+        if (!departure.empty() && !arrival.empty())
+        {
+            departureRunway = departure.at(0);
+            arrivalRunway1 = arrival.at(0);
+            arrivalRunway2 = arrival.at(arrival.size() - 1);
+            return;
+        }
+
+        auto fallbackRunway = m_airport->findLongestRunway()->end1().name();
+        departureRunway = !departure.empty() ? departure.at(0) : fallbackRunway;
+        arrivalRunway1 = !arrival.empty() ? arrival.at(0) : fallbackRunway;
         arrivalRunway2 = !arrival.empty() ? arrival.at(arrival.size() - 1) : arrivalRunway1;
     }
 
@@ -430,7 +454,8 @@ private:
         const string& airlineIcao = "",
         const string& flightNo = "",
         const string& callSign = "",
-        const string& tailNo = "")
+        const string& tailNo = "",
+        Flight::RulesType rules = Flight::RulesType::IFR)
     {
         string effectiveAirlineIcao = airlineIcao.empty()
             ? aircraftOption.airlineIcao
@@ -462,7 +487,7 @@ private:
         auto flight = shared_ptr<Flight>(new Flight(
             m_host,
             flightId,
-            Flight::RulesType::IFR,
+            rules,
             effectiveAirlineIcao,
             effectiveFlightNo,
             effectiveCallSign,
@@ -492,7 +517,8 @@ private:
         const string& airlineIcao = "",
         const string& flightNo = "",
         const string& callSign = "",
-        const string& tailNo = "")
+        const string& tailNo = "",
+        Flight::RulesType rules = Flight::RulesType::IFR)
     {
         string effectiveAirlineIcao = airlineIcao.empty()
             ? aircraftOption.airlineIcao
@@ -521,7 +547,7 @@ private:
         auto flight = shared_ptr<Flight>(new Flight(
             m_host,
             flightId,
-            Flight::RulesType::IFR,
+            rules,
             effectiveAirlineIcao,
             effectiveFlightNo,
             effectiveCallSign,
@@ -861,6 +887,17 @@ private:
         selectActiveRunwayNames(departureRunway, arrivalRunway1, arrivalRunway2);
         int arrivalIndex = 0;
         int nextFlightId = 1000;
+        const auto inferRules = [](const runtime_schedule::LiveAircraft& liveAircraft, const shared_ptr<ParkingStand>& gate) {
+            const string modelIcao = runtime_schedule::upper(liveAircraft.modelIcao);
+            const bool rotorcraftModel = (modelIcao == "A109" || modelIcao == "B412" || modelIcao == "H60");
+            const bool gaModel = (modelIcao == "C172" || modelIcao == "C208" || modelIcao == "SR22");
+            const bool vfrStand =
+                gate->hasAircraftCategory(world::Aircraft::Category::Helicopter) ||
+                gate->hasOperationType(world::Aircraft::OperationType::GA);
+            return (rotorcraftModel || gaModel || vfrStand)
+                ? Flight::RulesType::VFR
+                : Flight::RulesType::IFR;
+        };
 
         for (size_t i = 0 ; i < acceptedSchedules.size() ; i++)
         {
@@ -874,6 +911,7 @@ private:
                 liveAircraft.modelIcao,
                 route.airlineIcao);
             const string tailNo = runtime_schedule::chooseTailNumber(liveAircraft, to_string(nextFlightId));
+            const Flight::RulesType rules = inferRules(liveAircraft, schedule.gate);
 
             try
             {
@@ -889,7 +927,8 @@ private:
                         route.airlineIcao,
                         route.flightNo,
                         liveAircraft.callSign,
-                        tailNo);
+                        tailNo,
+                        rules);
                     m_world->addFlightColdAndDark(flight);
                 }
                 else
@@ -911,7 +950,8 @@ private:
                         route.airlineIcao,
                         arrivalFlightNo,
                         arrivalCallSign,
-                        tailNo);
+                        tailNo,
+                        rules);
                     scheduleInboundFlight(inboundFlight, arrivalRunway, schedule.arrivalTime);
 
                     if (schedule.candidate.type == runtime_schedule::CandidateType::Turnaround)
@@ -926,7 +966,8 @@ private:
                             route.airlineIcao,
                             route.flightNo,
                             liveAircraft.callSign,
-                            tailNo);
+                            tailNo,
+                            rules);
                         scheduleTurnaroundDeparture(outboundFlight, schedule.departureTime);
                     }
                 }
@@ -1023,6 +1064,452 @@ private:
             catch(const std::exception& e)
             {
                 m_host->writeLog("SCHEDL|CRASHED while adding AI flight!!! %s", e.what());
+            }
+        }
+    }
+
+    vector<runtime_schedule::MilitaryAirbase> loadMilitaryAirbases() const
+    {
+        string filePath = m_host->getResourceFilePath({ "Resources", "MilitaryAirbases.csv" });
+
+        try
+        {
+            shared_ptr<istream> file = m_host->openFileForRead(filePath);
+            return runtime_schedule::parseMilitaryAirbasesCsv(*file);
+        }
+        catch (const exception& e)
+        {
+            m_host->writeLog("SCHEDL|Skipping military airbase metadata [%s]: %s", filePath.c_str(), e.what());
+        }
+
+        return {};
+    }
+
+    vector<shared_ptr<Airport>> findRouteAirportOptionsWithin(float maxDistanceNm) const
+    {
+        vector<shared_ptr<Airport>> routeAirports = findRouteAirportOptions();
+        if (maxDistanceNm <= 0)
+        {
+            return routeAirports;
+        }
+
+        vector<shared_ptr<Airport>> nearbyAirports;
+        const double maxDistanceMeters = maxDistanceNm * METERS_IN_1_NAUTICAL_MILE;
+        for (const auto& airport : routeAirports)
+        {
+            if (GeoMath::getDistanceMeters(m_airport->header().datum(), airport->header().datum()) <= maxDistanceMeters)
+            {
+                nearbyAirports.push_back(airport);
+            }
+        }
+
+        return nearbyAirports.empty()
+            ? routeAirports
+            : nearbyAirports;
+    }
+
+    vector<shared_ptr<Airport>> findMilitaryRouteAirportOptions(
+        const vector<runtime_schedule::MilitaryAirbase>& airbases) const
+    {
+        vector<shared_ptr<Airport>> routeAirports;
+        for (const auto& airport : findRouteAirportOptions())
+        {
+            if (runtime_schedule::findMilitaryAirbase(airbases, airport->header().icao()))
+            {
+                routeAirports.push_back(airport);
+            }
+        }
+
+        return routeAirports;
+    }
+
+    vector<shared_ptr<ParkingStand>> findUsableStandsForSpecialFlights() const
+    {
+        GeoPoint userAircraftLocation((float)m_userAircraftLatitude, (float)m_userAircraftLongitude);
+
+        const auto isUserAircraftParkedAtStand = [&](const shared_ptr<ParkingStand>& stand)->bool {
+            return GeoMath::getDistanceMeters(userAircraftLocation, stand->location().geo()) < 50;
+        };
+        const auto hasBlockedKeyword = [](const string& value)->bool {
+            const string upperValue = runtime_schedule::upper(value);
+            return (
+                upperValue.find("FUEL") != string::npos ||
+                upperValue.find("MAINT") != string::npos ||
+                upperValue.find("DOCK") != string::npos ||
+                upperValue.find("SERVICE") != string::npos ||
+                upperValue.find("BUS") != string::npos ||
+                upperValue.find("CAR") != string::npos);
+        };
+        const auto isPassengerGateLike = [](const shared_ptr<ParkingStand>& stand)->bool {
+            const string upperName = runtime_schedule::upper(stand->name());
+            return (
+                stand->type() == ParkingStand::Type::Gate &&
+                stand->hasOperationType(world::Aircraft::OperationType::Airline) &&
+                !stand->hasOperationType(world::Aircraft::OperationType::Cargo) &&
+                upperName.find("HEL") == string::npos &&
+                upperName.find("MILI") == string::npos &&
+                upperName.find("RAMP") == string::npos &&
+                (upperName.find("GA") == string::npos || upperName.find("GATE") != string::npos) &&
+                upperName.find("G.A") == string::npos &&
+                upperName.find("GENERAL") == string::npos &&
+                upperName.find("GRASS") == string::npos &&
+                upperName.find("DIRT") == string::npos &&
+                upperName.find("FUEL") == string::npos &&
+                upperName.find("CARGO") == string::npos &&
+                upperName.find("HANG") == string::npos &&
+                upperName.find("TIE") == string::npos &&
+                upperName.find("MAINT") == string::npos &&
+                upperName.find("DOCK") == string::npos);
+        };
+        const auto canUseStand = [&](const shared_ptr<ParkingStand>& stand)->bool {
+            if (isUserAircraftParkedAtStand(stand) || hasBlockedKeyword(stand->name()))
+            {
+                return false;
+            }
+
+            if (isPassengerGateLike(stand))
+            {
+                return false;
+            }
+
+            if (stand->type() == ParkingStand::Type::Unknown)
+            {
+                return false;
+            }
+
+            if (stand->hasOperationType(world::Aircraft::OperationType::Cargo) &&
+                !stand->hasOperationType(world::Aircraft::OperationType::Military))
+            {
+                return false;
+            }
+
+            return (
+                stand->hasAircraftCategory(world::Aircraft::Category::Helicopter) ||
+                stand->hasOperationType(world::Aircraft::OperationType::GA) ||
+                stand->hasOperationType(world::Aircraft::OperationType::Military) ||
+                stand->type() == ParkingStand::Type::Remote ||
+                stand->type() == ParkingStand::Type::Hangar ||
+                stand->type() == ParkingStand::Type::Gate);
+        };
+
+        vector<shared_ptr<ParkingStand>> usableStands;
+        copy_if(
+            m_airport->parkingStands().begin(),
+            m_airport->parkingStands().end(),
+            back_inserter(usableStands),
+            canUseStand);
+
+        return usableStands;
+    }
+
+    void initSpecialSchedules(float loadFactor, time_t firstDepartureTime, time_t firstArrivalTime)
+    {
+        if (loadFactor <= 0)
+        {
+            return;
+        }
+
+        vector<shared_ptr<ParkingStand>> usableStands = findUsableStandsForSpecialFlights();
+        if (usableStands.empty())
+        {
+            return;
+        }
+
+        vector<unsigned int> indices(usableStands.size());
+        iota(indices.begin(), indices.end(), 0);
+        shuffle(indices.begin(), indices.end(), std::default_random_engine(std::random_device{}()));
+
+        const int requestedCount = max(1, (int)(usableStands.size() * loadFactor));
+        vector<runtime_schedule::MilitaryAirbase> militaryAirbases = loadMilitaryAirbases();
+        const auto *currentMilitaryBase = runtime_schedule::findMilitaryAirbase(
+            militaryAirbases,
+            m_airport->header().icao());
+        const bool militaryAirport = currentMilitaryBase != nullptr;
+
+        string activeDepartureRunway;
+        string activeArrivalRunway1;
+        string activeArrivalRunway2;
+        selectActiveRunwayNames(activeDepartureRunway, activeArrivalRunway1, activeArrivalRunway2);
+
+        vector<shared_ptr<Airport>> allRouteAirports = findRouteAirportOptions();
+        vector<shared_ptr<Airport>> nearbyGaRouteAirports = findRouteAirportOptionsWithin(120);
+        vector<shared_ptr<Airport>> nearbyRotorRouteAirports = findRouteAirportOptionsWithin(60);
+        vector<shared_ptr<Airport>> nearbyMilitaryRouteAirports = findRouteAirportOptionsWithin(250);
+        vector<shared_ptr<Airport>> militaryRouteAirports = findMilitaryRouteAirportOptions(militaryAirbases);
+
+        const auto isRotorModel = [](const string& modelIcao)->bool {
+            return (modelIcao == "A109" || modelIcao == "B412" || modelIcao == "H60");
+        };
+        const auto isTransportModel = [](const string& modelIcao)->bool {
+            return (
+                modelIcao == "A400" ||
+                modelIcao == "AN26" ||
+                modelIcao == "C130" ||
+                modelIcao == "C17" ||
+                modelIcao == "C208" ||
+                modelIcao == "C212");
+        };
+        const auto isFighterModel = [](const string& modelIcao)->bool {
+            return (
+                modelIcao == "A10" ||
+                modelIcao == "F16" ||
+                modelIcao == "F18" ||
+                modelIcao == "F35" ||
+                modelIcao == "F5" ||
+                modelIcao == "HAWK");
+        };
+        const auto chooseRole = [&](const shared_ptr<ParkingStand>& stand)->SpecialTrafficRole {
+            const bool helicopterStand =
+                stand->hasAircraftCategory(world::Aircraft::Category::Helicopter) ||
+                runtime_schedule::upper(stand->name()).find("HEL") != string::npos;
+            const bool militaryStand =
+                stand->hasOperationType(world::Aircraft::OperationType::Military) ||
+                militaryAirport;
+
+            if (helicopterStand)
+            {
+                return militaryStand
+                    ? SpecialTrafficRole::MilitaryRotorcraft
+                    : SpecialTrafficRole::Rotorcraft;
+            }
+
+            if (militaryStand)
+            {
+                if (currentMilitaryBase && currentMilitaryBase->operation == "TRANSPORT")
+                {
+                    return SpecialTrafficRole::MilitaryTransport;
+                }
+                if (currentMilitaryBase && currentMilitaryBase->operation == "HELICOPTER")
+                {
+                    return SpecialTrafficRole::MilitaryRotorcraft;
+                }
+                return stand->type() == ParkingStand::Type::Gate
+                    ? SpecialTrafficRole::MilitaryTransport
+                    : SpecialTrafficRole::MilitaryFighter;
+            }
+
+            return SpecialTrafficRole::GeneralAviation;
+        };
+        const auto buildSpecialOptions = [&](SpecialTrafficRole role)->vector<AircraftOption> {
+            vector<AircraftOption> options;
+            const auto pushOption = [&options](const string& modelIcao, const string& callSignPrefix, Flight::RulesType rules) {
+                if (!modelIcao.empty())
+                {
+                    options.push_back({ modelIcao, "", callSignPrefix, rules });
+                }
+            };
+            const auto pushMilitaryModels = [&](const vector<string>& defaults, const string& callSignPrefix, Flight::RulesType rules) {
+                vector<string> models;
+                if (currentMilitaryBase)
+                {
+                    for (const string& model : {
+                        currentMilitaryBase->primaryModelIcao,
+                        currentMilitaryBase->secondaryModelIcao,
+                        currentMilitaryBase->tertiaryModelIcao
+                    })
+                    {
+                        if (!model.empty())
+                        {
+                            models.push_back(model);
+                        }
+                    }
+                }
+                if (models.empty())
+                {
+                    models = defaults;
+                }
+
+                for (const auto& model : models)
+                {
+                    switch (role)
+                    {
+                    case SpecialTrafficRole::MilitaryRotorcraft:
+                        if (isRotorModel(model))
+                        {
+                            pushOption(model, callSignPrefix, rules);
+                        }
+                        break;
+                    case SpecialTrafficRole::MilitaryTransport:
+                        if (isTransportModel(model))
+                        {
+                            pushOption(model, callSignPrefix, rules);
+                        }
+                        break;
+                    case SpecialTrafficRole::MilitaryFighter:
+                        if (isFighterModel(model))
+                        {
+                            pushOption(model, callSignPrefix, rules);
+                        }
+                        break;
+                    default:
+                        break;
+                    }
+                }
+            };
+
+            switch (role)
+            {
+            case SpecialTrafficRole::GeneralAviation:
+                pushOption("C172", "", Flight::RulesType::VFR);
+                pushOption("SR22", "", Flight::RulesType::VFR);
+                pushOption("C208", "", Flight::RulesType::VFR);
+                break;
+            case SpecialTrafficRole::Rotorcraft:
+                pushOption("A109", "", Flight::RulesType::VFR);
+                pushOption("B412", "", Flight::RulesType::VFR);
+                pushOption("H60", "", Flight::RulesType::VFR);
+                break;
+            case SpecialTrafficRole::MilitaryFighter:
+                pushMilitaryModels({ "F16", "F35", "F18", "A10", "HAWK" }, "Raven", Flight::RulesType::VFR);
+                break;
+            case SpecialTrafficRole::MilitaryTransport:
+                pushMilitaryModels({ "C130", "C17", "A400", "C212", "AN26" }, "Reach", Flight::RulesType::IFR);
+                break;
+            case SpecialTrafficRole::MilitaryRotorcraft:
+                pushMilitaryModels({ "H60", "B412", "A109" }, "Rescue", Flight::RulesType::VFR);
+                break;
+            }
+
+            return options;
+        };
+        const auto buildTailNumber = [](SpecialTrafficRole role, int flightId)->string {
+            const int sequence = 100 + (flightId % 900);
+            switch (role)
+            {
+            case SpecialTrafficRole::GeneralAviation:
+                return "N" + to_string(1000 + sequence);
+            case SpecialTrafficRole::Rotorcraft:
+                return "N" + to_string(2000 + sequence) + "H";
+            case SpecialTrafficRole::MilitaryRotorcraft:
+                return "HH" + to_string(sequence);
+            case SpecialTrafficRole::MilitaryTransport:
+                return "AMC" + to_string(sequence);
+            case SpecialTrafficRole::MilitaryFighter:
+                return "AF" + to_string(sequence);
+            }
+            return to_string(sequence);
+        };
+        const auto buildCallSign = [](
+            const AircraftOption& aircraftOption,
+            SpecialTrafficRole role,
+            int flightId,
+            const string& tailNo)->string {
+            if (
+                role == SpecialTrafficRole::GeneralAviation ||
+                role == SpecialTrafficRole::Rotorcraft)
+            {
+                return tailNo;
+            }
+
+            return aircraftOption.callSignPrefix.empty()
+                ? tailNo
+                : aircraftOption.callSignPrefix + " " + to_string(100 + (flightId % 800));
+        };
+        const auto routeOptionsForRole = [&](
+            SpecialTrafficRole role)->const vector<shared_ptr<Airport>>* {
+            switch (role)
+            {
+            case SpecialTrafficRole::GeneralAviation:
+                return nearbyGaRouteAirports.empty()
+                    ? &allRouteAirports
+                    : &nearbyGaRouteAirports;
+            case SpecialTrafficRole::Rotorcraft:
+                return nearbyRotorRouteAirports.empty()
+                    ? &nearbyGaRouteAirports
+                    : &nearbyRotorRouteAirports;
+            case SpecialTrafficRole::MilitaryRotorcraft:
+                if (!militaryRouteAirports.empty())
+                {
+                    return &militaryRouteAirports;
+                }
+                return nearbyRotorRouteAirports.empty()
+                    ? &allRouteAirports
+                    : &nearbyRotorRouteAirports;
+            case SpecialTrafficRole::MilitaryTransport:
+                return militaryRouteAirports.empty()
+                    ? &allRouteAirports
+                    : &militaryRouteAirports;
+            case SpecialTrafficRole::MilitaryFighter:
+                if (!militaryRouteAirports.empty())
+                {
+                    return &militaryRouteAirports;
+                }
+                return nearbyMilitaryRouteAirports.empty()
+                    ? &allRouteAirports
+                    : &nearbyMilitaryRouteAirports;
+            }
+            return &allRouteAirports;
+        };
+
+        int arrivalIndex = 0;
+        int nextFlightId = 5000;
+        time_t nextDepartureTime = firstDepartureTime;
+        time_t nextArrivalTime = firstArrivalTime;
+        const int secondsBetweenDepartures = max(75, (int)(180 * max(0.2f, 0.7f / loadFactor)));
+        const int secondsBetweenArrivals = max(75, (int)(180 * max(0.2f, 0.7f / loadFactor)));
+
+        for (int i = 0 ; i < indices.size() && i < requestedCount ; i++)
+        {
+            const auto& stand = usableStands.at(indices.at(i));
+            const SpecialTrafficRole role = chooseRole(stand);
+            const vector<AircraftOption> options = buildSpecialOptions(role);
+            const auto *routeAirports = routeOptionsForRole(role);
+            if (options.empty() || !routeAirports || routeAirports->empty())
+            {
+                continue;
+            }
+
+            const AircraftOption& aircraftOption = options.at(i % options.size());
+            const auto& routeAirport = routeAirports->at(i % routeAirports->size());
+            const string tailNo = buildTailNumber(role, nextFlightId);
+            const string callSign = buildCallSign(aircraftOption, role, nextFlightId, tailNo);
+
+            try
+            {
+                if ((i % 2) == 0)
+                {
+                    time_t departureTime = nextDepartureTime;
+                    nextDepartureTime += secondsBetweenDepartures;
+                    auto flight = createOutboundFlight(
+                        aircraftOption,
+                        nextFlightId++,
+                        routeAirport->header().icao(),
+                        departureTime,
+                        stand,
+                        activeDepartureRunway,
+                        aircraftOption.airlineIcao,
+                        "",
+                        callSign,
+                        tailNo,
+                        aircraftOption.rules);
+                    m_world->addFlightColdAndDark(flight);
+                }
+                else
+                {
+                    time_t arrivalTime = nextArrivalTime;
+                    nextArrivalTime += secondsBetweenArrivals;
+                    string arrivalRunway = ((arrivalIndex++) % 2) == 0 ? activeArrivalRunway1 : activeArrivalRunway2;
+                    auto flight = createInboundFlight(
+                        aircraftOption,
+                        nextFlightId++,
+                        routeAirport->header().icao(),
+                        arrivalTime,
+                        stand,
+                        arrivalRunway,
+                        aircraftOption.airlineIcao,
+                        "",
+                        callSign,
+                        tailNo,
+                        aircraftOption.rules);
+                    scheduleInboundFlight(flight, arrivalRunway, arrivalTime);
+                }
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog(
+                    "SCHEDL|Failed to add special AI flight at stand[%s]: %s",
+                    stand->name().c_str(),
+                    e.what());
             }
         }
     }

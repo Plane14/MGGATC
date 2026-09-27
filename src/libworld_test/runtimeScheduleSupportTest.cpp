@@ -141,3 +141,21 @@ TEST(RuntimeScheduleSupportTest, classifiesGroundOriginAsDepartureOnly) {
     EXPECT_EQ("KLAX", candidate.originIcao);
     EXPECT_EQ("KLAS", candidate.destinationIcao);
 }
+
+TEST(RuntimeScheduleSupportTest, parsesMilitaryAirbasesCsv) {
+    stringstream csv(R"csv(
+icao,name,country,operation,primary_model_icao,secondary_model_icao,tertiary_model_icao
+KLSV,Nellis Air Force Base,United States,FIGHTER,F16,F35,H60
+ETAR,Ramstein Air Base,Germany,TRANSPORT,C17,C130,H60
+)csv");
+
+    const auto airbases = parseMilitaryAirbasesCsv(csv);
+
+    ASSERT_EQ(2, airbases.size());
+    EXPECT_EQ("KLSV", airbases[0].icao);
+    EXPECT_EQ("Nellis Air Force Base", airbases[0].name);
+    EXPECT_EQ("FIGHTER", airbases[0].operation);
+    EXPECT_EQ("F16", airbases[0].primaryModelIcao);
+    ASSERT_TRUE(findMilitaryAirbase(airbases, "etar"));
+    EXPECT_EQ("C17", findMilitaryAirbase(airbases, "ETAR")->primaryModelIcao);
+}

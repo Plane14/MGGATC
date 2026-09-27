@@ -3,6 +3,7 @@
 // Code licensing terms are available at https://github.com/felix-b/atc/blob/master/LICENSE
 // 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <vector>
 #include <memory>
@@ -32,8 +33,11 @@ namespace world
             if (airport->tower())
             {
                 auto airspace = airport->tower()->airspace();
-                world->m_airspaces.push_back(airspace);
-                world->m_airspaceById.insert({airspace->id(), airspace});
+                if (airspace)
+                {
+                    world->m_airspaces.push_back(airspace);
+                    world->m_airspaceById.insert({airspace->id(), airspace});
+                }
                 world->m_controlFacilities.push_back(airport->tower());
             }
         }
@@ -77,6 +81,26 @@ namespace world
         const vector<ControllerPosition::Structure>& positions)
     {
         auto tower = make_shared<ControlFacility>();
+        const auto isAdvisoryText = [](const string& text)->bool {
+            string upperText = text;
+            transform(upperText.begin(), upperText.end(), upperText.begin(), [](unsigned char c) {
+                return (char)toupper(c);
+            });
+            return (
+                upperText.find("UNICOM") != string::npos ||
+                upperText.find("CTAF") != string::npos ||
+                upperText.find("TRAFFIC") != string::npos ||
+                upperText.find("ADVISORY") != string::npos);
+        };
+        bool isAdvisoryOnly = !positions.empty();
+        for (const auto& posInit : positions)
+        {
+            if (posInit.type != ControllerPosition::Type::Local || !isAdvisoryText(posInit.callSign))
+            {
+                isAdvisoryOnly = false;
+                break;
+            }
+        }
 
         const auto getPositionCallSign = [&](const ControllerPosition::Structure& init) {
             switch (init.type)
@@ -86,7 +110,9 @@ namespace world
                 case ControllerPosition::Type::Ground:
                     return tower->callSign() + " Ground";
                 case ControllerPosition::Type::Local:
-                    return tower->callSign() + " Tower";
+                    return (isAdvisoryOnly || isAdvisoryText(init.callSign))
+                        ? tower->callSign() + " Advisory"
+                        : tower->callSign() + " Tower";
                 case ControllerPosition::Type::Approach:
                     return tower->callSign() + " Approach";
                 case ControllerPosition::Type::Departure:
@@ -96,6 +122,9 @@ namespace world
         };
 
         const auto assemblePosition = [&](const ControllerPosition::Structure& init) {
+            const bool isAdvisoryPosition =
+                init.type == ControllerPosition::Type::Local &&
+                (isAdvisoryOnly || isAdvisoryText(init.callSign));
             auto frequency = shared_ptr<Frequency>(new Frequency(
                 host,
                 init.frequencyKhz,
@@ -114,6 +143,7 @@ namespace world
                 frequency,
                 radarScope
             ));
+            position->m_isAdvisory = isAdvisoryPosition;
             frequency->m_controllerPosition = position;
 
             return position;
@@ -124,8 +154,9 @@ namespace world
             ? header.icao().substr(1)  // ICAO->FAA
             : header.icao());
 
-        tower->m_name = header.icao() + " Tower";
+        tower->m_name = header.icao() + (isAdvisoryOnly ? " Advisory" : " Tower");
         tower->m_type = ControlFacility::Type::Tower;
+        tower->m_isAdvisoryOnly = isAdvisoryOnly;
         tower->m_airspace = airspace;
         
         for (const auto& posInit : positions)

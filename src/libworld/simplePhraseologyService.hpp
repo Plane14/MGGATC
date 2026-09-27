@@ -94,6 +94,11 @@ namespace world
 
     private:
 
+        bool isAdvisory(const shared_ptr<ControllerPosition>& position) const
+        {
+            return position && position->isAdvisory();
+        }
+
         void buildVerbalizerMap()
         {
             //TODO: define a macro???
@@ -120,6 +125,7 @@ namespace world
             MAP_VERBALIZER_INTENT(TowerClearedForTakeoffIntent, verbalizeTakeoffClearance);
             MAP_VERBALIZER_INTENT(PilotTakeoffClearanceReadbackIntent, verbalizeTakeoffClearanceReadback);
             MAP_VERBALIZER_INTENT(PilotReportFinalIntent, verbalizeReportFinal);
+            MAP_VERBALIZER_INTENT(PilotReportPatternIntent, verbalizeReportPattern);
             MAP_VERBALIZER_INTENT(TowerClearedForLandingIntent, verbalizeLandingClearance);
             MAP_VERBALIZER_INTENT(TowerDepartureCheckInReplyIntent, verbalizeTowerDepartureCheckInReply);
             MAP_VERBALIZER_INTENT(PilotLandingClearanceReadbackIntent, verbalizeLandingClearanceReadback);
@@ -507,7 +513,7 @@ namespace world
         void verbalizeSwitchToTower(UtteranceBuilder& builder, shared_ptr<GroundSwitchToTowerIntent> intent)
         {
             builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
-            builder.addText("contact tower on");
+            builder.addText(isAdvisory(intent->subjectControl()) ? "monitor advisory on" : "contact tower on");
             builder.addData(spellFrequency(intent->towerKhz()));
             builder.addFarewell("have a good one");
         }
@@ -575,6 +581,16 @@ namespace world
 
         void verbalizeLineUpAndWaitReadback(UtteranceBuilder& builder, shared_ptr<PilotLineUpAndWaitReadbackIntent> intent)
         {
+            if (isAdvisory(intent->subjectControl()))
+            {
+                builder.addData(spellCallsign(intent->subjectControl()->callSign()));
+                builder.addPunctuation();
+                builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
+                builder.addText("taking runway");
+                builder.addData(spellRunway(intent->runway()));
+                return;
+            }
+
             builder.addText("runway");
             builder.addData(spellRunway(intent->runway()));
             builder.addText("line up and wait");
@@ -601,9 +617,24 @@ namespace world
             const auto& runwayEnd = m_host->getWorld()->getRunwayEnd(
                 intent->subjectFlight()->plan()->departureAirportIcao(), 
                 clearance->departureRunway());
+            const bool advisory = isAdvisory(intent->subjectControl());
 
             builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
             builder.addPunctuation();
+            if (advisory)
+            {
+                builder.addText("runway");
+                builder.addData(spellRunway(intent->clearance()->departureRunway()));
+                if (!intent->traffic().empty())
+                {
+                    builder.addPunctuation();
+                    addTrafficAdvisory(builder, intent->traffic());
+                }
+                builder.addPunctuation();
+                builder.addText("depart at your discretion");
+                return;
+            }
+
             builder.addText("winds calm"); //TODO add winds data
 
             float turnDegrees = GeoMath::getTurnDegrees(runwayEnd.heading(), clearance->initialHeading());
@@ -644,6 +675,16 @@ namespace world
         {
             auto clearance = intent->clearance();
 
+            if (isAdvisory(intent->subjectControl()))
+            {
+                builder.addData(spellCallsign(intent->subjectControl()->callSign()));
+                builder.addPunctuation();
+                builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
+                builder.addText("departing runway");
+                builder.addData(spellRunway(intent->clearance()->departureRunway()));
+                return;
+            }
+
             builder.addText("heading");
             builder.addData(spellHeading(clearance->initialHeading()));
 
@@ -672,8 +713,40 @@ namespace world
             builder.addData(spellRunway(intent->runway()));
         }
 
+        void verbalizeReportPattern(UtteranceBuilder& builder, shared_ptr<PilotReportPatternIntent> intent)
+        {
+            builder.addData(spellCallsign(intent->subjectControl()->callSign()));
+            builder.addPunctuation();
+            builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
+            switch (intent->leg())
+            {
+            case PilotReportPatternIntent::Leg::Downwind:
+                builder.addText("left downwind runway");
+                break;
+            case PilotReportPatternIntent::Leg::Base:
+                builder.addText("left base runway");
+                break;
+            }
+            builder.addData(spellRunway(intent->runway()));
+        }
+
         void verbalizeLandingClearance(UtteranceBuilder& builder, shared_ptr<TowerClearedForLandingIntent> intent)
         {
+            if (isAdvisory(intent->subjectControl()))
+            {
+                builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
+                builder.addText("runway");
+                builder.addData(spellRunway(intent->clearance()->runway()));
+                if (!intent->traffic().empty())
+                {
+                    builder.addPunctuation();
+                    addTrafficAdvisory(builder, intent->traffic());
+                }
+                builder.addPunctuation();
+                builder.addText("land at your discretion");
+                return;
+            }
+
             builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
             builder.addText("winds calm cleared to land runway");
             builder.addData(spellRunway(intent->clearance()->runway()));
@@ -689,6 +762,16 @@ namespace world
 
         void verbalizeLandingClearanceReadback(UtteranceBuilder& builder, shared_ptr<PilotLandingClearanceReadbackIntent> intent)
         {
+            if (isAdvisory(intent->subjectControl()))
+            {
+                builder.addData(spellCallsign(intent->subjectControl()->callSign()));
+                builder.addPunctuation();
+                builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
+                builder.addText("landing runway");
+                builder.addData(spellRunway(intent->clearance()->runway()));
+                return;
+            }
+
             builder.addText("cleared to land");
             builder.addData(spellRunway(intent->clearance()->runway()));
             builder.addFarewell(spellCallsign(intent->subjectFlight()->callSign()));
@@ -700,12 +783,12 @@ namespace world
             builder.addPunctuation();
             builder.addData(spellCallsign(intent->subjectFlight()->callSign()));
             builder.addPunctuation();
-            builder.addText("vacated runway");
+            builder.addText(isAdvisory(intent->subjectControl()) ? "clear of runway" : "vacated runway");
             builder.addData(spellRunway(intent->runway()));
             builder.addText("at");
             builder.addData(spellPhoneticString(intent->exitName()));
 
-            if (isHeads(intent))
+            if (!isAdvisory(intent->subjectControl()) && isHeads(intent))
             {
                 builder.addPunctuation();
                 builder.addText("request taxi instructions to terminal");

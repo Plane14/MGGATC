@@ -302,6 +302,28 @@ TEST(RunwayMutexTest, D__vacated_1stInLine_less90sec__checkIn__hold_traffic)
         .thenHoldShort(DeclineReason::TrafficLanding, true));
 }
 
+TEST(RunwayMutexTest, D__heavy_departure_light_arrival_requires_more_spacing)
+{
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("C17")
+        .otherTrafficType("C172")
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(120).end()
+        .whenDepartureChecksIn()
+        .thenHoldShort(DeclineReason::TrafficLanding, true));
+}
+
+TEST(RunwayMutexTest, D__helicopter_departure_can_launch_with_tighter_spacing)
+{
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("A109")
+        .otherTrafficType("A109")
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(70).end()
+        .whenDepartureChecksIn()
+        .thenClearForTakeoff(true));
+}
+
 //------
 
 TEST(RunwayMutexTest, D__landing__checkIn__hold_traffic)

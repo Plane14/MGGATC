@@ -8,6 +8,7 @@ enable_testing()
 add_executable(libai_test 
     aircraftPerformanceModelTest.cpp
     maneuverFactoryTest.cpp
+    trafficPatternTest.cpp
     workflowTest.cpp
     mutexTestCase.hpp
     mutexLongRunningTestCase.hpp

@@ -81,6 +81,7 @@ XPAirportReader::XPAirportReader(
     m_nextParkingStandId(301),
     m_datumLatitude(DATUM_UNSPECIFIED),
     m_datumLongitude(DATUM_UNSPECIFIED),
+    m_advisoryFrequencyKhz(0),
     m_elevation(0),
     m_skippingAirport(false),
     m_headerWasRead(false),
@@ -125,8 +126,9 @@ shared_ptr<Airport> XPAirportReader::assembleAirportOrThrow()
 
     Airport::Header header(m_icao, m_name, datum, m_elevation);
     m_airspace = m_onQueryAirspace(header);
+    ensureLocalAdvisoryPosition();
     
-    shared_ptr<ControlFacility> tower = m_airspace
+    shared_ptr<ControlFacility> tower = !m_controllerPositions.empty()
         ? WorldBuilder::assembleAirportTower(m_host, header, m_airspace, m_controllerPositions)
         : nullptr;
 
@@ -141,6 +143,47 @@ shared_ptr<Airport> XPAirportReader::assembleAirportOrThrow()
         m_airspace);
 
     return airport;
+}
+
+void XPAirportReader::ensureLocalAdvisoryPosition()
+{
+    const auto hasLocalPosition = [this]()->bool {
+        for (const auto& position : m_controllerPositions)
+        {
+            if (position.type == ControllerPosition::Type::Local)
+            {
+                return true;
+            }
+        }
+        return false;
+    }();
+
+    if (hasLocalPosition)
+    {
+        return;
+    }
+
+    int fallbackFrequencyKhz = m_advisoryFrequencyKhz;
+    if (fallbackFrequencyKhz <= 0 && !m_controllerPositions.empty())
+    {
+        fallbackFrequencyKhz = FREQUENCY_UNICOM_1228;
+    }
+
+    if (fallbackFrequencyKhz <= 0)
+    {
+        return;
+    }
+
+    const string fallbackCallSign = m_advisoryCallSign.empty()
+        ? "UNICOM"
+        : m_advisoryCallSign;
+    ControllerPosition::Structure position = {
+        ControllerPosition::Type::Local,
+        fallbackFrequencyKhz,
+        GeoPolygon::empty(),
+        fallbackCallSign
+    };
+    m_controllerPositions.push_back(position);
 }
 
 void XPAirportReader::readAptDatInContext(istream& input, ContextualParser parser)
@@ -512,19 +555,31 @@ void XPAirportReader::parseControlFrequency(int lineCode, istream &input)
         }
     };
 
-    const auto positionType = getPositionType();
-    if (positionType != ControllerPosition::Type::Unknown)
+    int khz;
+    string callSign;
+    input >> khz >> callSign;
+
+    if (lineCode == 51 || lineCode == 1051)
     {
-        int khz;
-        string callSign;
-        input >> khz >> callSign;
-        
-        if (tryInsertKey(m_parsedFrequencyKhz, khz))
+        if (m_advisoryFrequencyKhz <= 0)
         {
-            ControllerPosition::Structure position = { positionType, khz, GeoPolygon::empty(), callSign };
-            m_controllerPositions.push_back(position);
-            m_parsedFrequencyLineCodes.insert(lineCode);
+            m_advisoryFrequencyKhz = khz;
+            m_advisoryCallSign = callSign;
         }
+        return;
+    }
+
+    const auto positionType = getPositionType();
+    if (positionType == ControllerPosition::Type::Unknown)
+    {
+        return;
+    }
+
+    if (tryInsertKey(m_parsedFrequencyKhz, khz))
+    {
+        ControllerPosition::Structure position = { positionType, khz, GeoPolygon::empty(), callSign };
+        m_controllerPositions.push_back(position);
+        m_parsedFrequencyLineCodes.insert(lineCode);
     }
 }
 
@@ -753,4 +808,3 @@ void XPAptDatReader::readAptDat(
 
     m_host->writeLog("APTDAT|done loading airports, %d loaded, %d skipped.", loadedCount, skippedCount);
 }
-

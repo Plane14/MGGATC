@@ -24,6 +24,7 @@ add_executable(libworld_test
     airlineReferenceTableTest.cpp
     aircraftPerformanceProfileServiceTest.cpp
     runtimeScheduleSupportTest.cpp
+    simplePhraseologyServiceTest.cpp
     unit_testable_world.hpp
 )
 

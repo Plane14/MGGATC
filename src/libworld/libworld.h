@@ -828,6 +828,7 @@ namespace world
         Type m_type;
         shared_ptr<ControlFacility> m_facility;
         string m_callSign;
+        bool m_isAdvisory = false;
         shared_ptr<Frequency> m_frequency;
         vector<shared_ptr<Flight>> m_stripBoard;
         shared_ptr<RadarScope> m_radarScope;
@@ -845,6 +846,7 @@ namespace world
             m_type(_type),
             m_facility(_facility),
             m_callSign(_callSign),
+            m_isAdvisory(false),
             m_frequency(_frequency),
             m_radarScope(_radarScope)
         {
@@ -854,6 +856,7 @@ namespace world
         Type type() const { return m_type; }
         shared_ptr<ControlFacility> facility() const { return m_facility; }
         const string& callSign() const { return m_callSign; }
+        bool isAdvisory() const { return m_isAdvisory; }
         shared_ptr<Controller> controller() const { return m_controller; }
         shared_ptr<Frequency> frequency() const { return m_frequency; }
         const vector<shared_ptr<Flight>>& stripBoard() const { return m_stripBoard; }
@@ -884,6 +887,7 @@ namespace world
         string m_callSign;
         string m_name;
         Type m_type;
+        bool m_isAdvisoryOnly = false;
         shared_ptr<ControlledAirspace> m_airspace;
         shared_ptr<Airport> m_airport;
         vector<shared_ptr<ControllerPosition>> m_positions;
@@ -892,6 +896,7 @@ namespace world
         const string& callSign() const { return m_callSign; }
         const string& name() const { return m_name; }
         const Type type() const { return m_type; }
+        bool isAdvisoryOnly() const { return m_isAdvisoryOnly; }
         const shared_ptr<ControlledAirspace> airspace() const { return m_airspace; }
         const shared_ptr<Airport> airport() const { return m_airport; }
         const vector<shared_ptr<ControllerPosition>>& positions() const { return m_positions; }
@@ -1419,6 +1424,7 @@ namespace world
             Unspecified = 0,
             Flight = 1,
             DepartureAwaitIfrClearance = 5,
+            DepartureAwaitVfrReady = 6,
             DepartureAwaitPushback = 10,
             DeparturePushbackAndStart = 20,
             DepartureAwaitTaxi = 30,
@@ -1979,6 +1985,7 @@ namespace world
         const vector<shared_ptr<ParkingStand>>& parkingStands() const { return m_parkingStands; }
         shared_ptr<TaxiNet> taxiNet() const { return m_taxiNet; }
         shared_ptr<ControlFacility> tower() const { return m_tower; }
+        bool isAdvisoryOnly() const { return m_tower && m_tower->isAdvisoryOnly(); }
         bool hasParallelRunways() const { return m_parallelRunwayGroups.size() > 0; }
         int parallelRunwayGroupCount() const { return m_parallelRunwayGroups.size(); }
         const vector<string>& activeDepartureRunways() const { return m_mutableState->activeDepartureRunways; }
@@ -1995,23 +2002,48 @@ namespace world
         const vector<shared_ptr<Runway>>& findLongestParallelRunwayGroup() const;
         shared_ptr<ParkingStand> findClosestParkingStand(const GeoPoint& location);
     public:
+        shared_ptr<ControllerPosition> tryGetControllerPosition(ControllerPosition::Type type, const GeoPoint& location) const {
+            return m_tower
+                ? m_tower->tryFindPosition(type, location)
+                : nullptr;
+        }
         shared_ptr<ControllerPosition> getControllerPositionOrThrow(ControllerPosition::Type type, const GeoPoint& location) const {
+            if (!m_tower)
+            {
+                throw runtime_error("Controller position requested at airport without any controller positions");
+            }
+
+            auto position = m_tower->tryFindPosition(type, location);
+            if (position)
+            {
+                return position;
+            }
+
+            if (type != ControllerPosition::Type::Local)
+            {
+                auto advisory = m_tower->tryFindPosition(ControllerPosition::Type::Local, location);
+                if (advisory)
+                {
+                    return advisory;
+                }
+            }
+
             return m_tower->findPositionOrThrow(type, location);
         }
         shared_ptr<ControllerPosition> clearanceDeliveryAt(const GeoPoint& location) const {
-            return m_tower->findPositionOrThrow(ControllerPosition::Type::ClearanceDelivery, location);
+            return getControllerPositionOrThrow(ControllerPosition::Type::ClearanceDelivery, location);
         }
         shared_ptr<ControllerPosition> groundAt(const GeoPoint& location) const {
-            return m_tower->findPositionOrThrow(ControllerPosition::Type::Ground, location);
+            return getControllerPositionOrThrow(ControllerPosition::Type::Ground, location);
         }
         shared_ptr<ControllerPosition> localAt(const GeoPoint& location) const {
-            return m_tower->findPositionOrThrow(ControllerPosition::Type::Local, location);
+            return getControllerPositionOrThrow(ControllerPosition::Type::Local, location);
         }
         shared_ptr<ControllerPosition> departureAt(const GeoPoint& location) const {
-            return m_tower->findPositionOrThrow(ControllerPosition::Type::Departure, location);
+            return getControllerPositionOrThrow(ControllerPosition::Type::Departure, location);
         }
         shared_ptr<ControllerPosition> approachAt(const GeoPoint& location) const {
-            return m_tower->findPositionOrThrow(ControllerPosition::Type::Approach, location);
+            return getControllerPositionOrThrow(ControllerPosition::Type::Approach, location);
         }
     public:
         void selectActiveRunways();

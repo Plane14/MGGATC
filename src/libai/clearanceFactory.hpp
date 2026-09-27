@@ -51,7 +51,7 @@ namespace ai
         shared_ptr<PushAndStartApproval> pushAndStartApproval(shared_ptr<Flight> flight)
         {
             auto ifrClearance = flight->tryFindClearance<IfrClearance>(Clearance::Type::IfrClearance);
-            if (!ifrClearance)
+            if (flight->rules() == Flight::RulesType::IFR && !ifrClearance)
             {
                 return nullptr;
             }
@@ -142,7 +142,7 @@ namespace ai
         {
             auto airport = getDepartureAirport(flight);
             auto ifr = flight->tryFindClearance<IfrClearance>(Clearance::Type::IfrClearance);
-            if (!ifr)
+            if (flight->rules() == Flight::RulesType::IFR && !ifr)
             {
                 return nullptr;
             }
@@ -165,7 +165,7 @@ namespace ai
         {
             auto airport = getDepartureAirport(flight);
             auto ifr = flight->tryFindClearance<IfrClearance>(Clearance::Type::IfrClearance);
-            if (!ifr)
+            if (flight->rules() == Flight::RulesType::IFR && !ifr)
             {
                 return nullptr;
             }

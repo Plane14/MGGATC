@@ -857,6 +857,44 @@ namespace world
         const string& runway() const { return m_runway; }
     };
 
+    class PilotReportPatternIntent : public Intent
+    {
+    public:
+        enum class Leg
+        {
+            Downwind = 1,
+            Base = 2
+        };
+        static const int IntentCode = 1181;
+    private:
+        string m_runway;
+        Leg m_leg;
+    public:
+        PilotReportPatternIntent(
+            uint64_t _id,
+            shared_ptr<Flight> _subjectFlight,
+            shared_ptr<ControllerPosition> _subjectControl,
+            const string& _runway,
+            Leg _leg
+        ) : Intent(
+                _id,
+                0,
+                Direction::PilotToController,
+                Type::Report,
+                IntentCode,
+                ConversationState::Continue,
+                _subjectControl,
+                _subjectFlight
+            ),
+            m_runway(_runway),
+            m_leg(_leg)
+        {
+        }
+    public:
+        const string& runway() const { return m_runway; }
+        Leg leg() const { return m_leg; }
+    };
+
     class TowerContinueApproachIntent : public Intent
     {
     public:

@@ -535,6 +535,17 @@ namespace runtime_schedule
         double distanceMeters;
     };
 
+    struct MilitaryAirbase
+    {
+        string icao;
+        string name;
+        string country;
+        string operation;
+        string primaryModelIcao;
+        string secondaryModelIcao;
+        string tertiaryModelIcao;
+    };
+
     inline bool tryParseGroundAltitude(const JsonValue& value, double& altitudeFeet, bool& onGround)
     {
         altitudeFeet = 0;
@@ -774,5 +785,94 @@ namespace runtime_schedule
             return aircraft.hex;
         }
         return fallback;
+    }
+
+    inline vector<string> splitCsvRow(const string& line)
+    {
+        vector<string> values;
+        string current;
+        bool insideQuotes = false;
+
+        for (char c : line)
+        {
+            if (c == '"')
+            {
+                insideQuotes = !insideQuotes;
+                continue;
+            }
+
+            if (c == ',' && !insideQuotes)
+            {
+                values.push_back(trim(current));
+                current.clear();
+                continue;
+            }
+
+            current.push_back(c);
+        }
+
+        values.push_back(trim(current));
+        return values;
+    }
+
+    inline vector<MilitaryAirbase> parseMilitaryAirbasesCsv(istream& input)
+    {
+        vector<MilitaryAirbase> airbases;
+        string line;
+        bool skippedHeader = false;
+
+        while (getline(input, line))
+        {
+            line = trim(line);
+            if (line.empty() || line[0] == '#')
+            {
+                continue;
+            }
+
+            const vector<string> values = splitCsvRow(line);
+            if (!skippedHeader)
+            {
+                skippedHeader = true;
+                continue;
+            }
+
+            if (values.size() < 7)
+            {
+                continue;
+            }
+
+            MilitaryAirbase airbase = {
+                upper(values[0]),
+                values[1],
+                values[2],
+                upper(values[3]),
+                upper(values[4]),
+                upper(values[5]),
+                upper(values[6])
+            };
+
+            if (!airbase.icao.empty())
+            {
+                airbases.push_back(airbase);
+            }
+        }
+
+        return airbases;
+    }
+
+    inline const MilitaryAirbase* findMilitaryAirbase(
+        const vector<MilitaryAirbase>& airbases,
+        const string& icao)
+    {
+        const string targetIcao = upper(trim(icao));
+        for (const auto& airbase : airbases)
+        {
+            if (airbase.icao == targetIcao)
+            {
+                return &airbase;
+            }
+        }
+
+        return nullptr;
     }
 }
