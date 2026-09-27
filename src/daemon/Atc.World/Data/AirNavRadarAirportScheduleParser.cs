@@ -118,10 +118,16 @@ public static class AirNavRadarAirportScheduleParser
             return null;
         }
 
-        return DateTime.Parse(
+        if (!DateTime.TryParse(
             value,
             CultureInfo.InvariantCulture,
-            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out var parsed))
+        {
+            return null;
+        }
+
+        return parsed;
     }
 
     private sealed record AirportScheduleSnapshotPayload(

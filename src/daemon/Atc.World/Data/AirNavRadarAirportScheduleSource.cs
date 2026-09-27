@@ -63,9 +63,15 @@ public class AirNavRadarAirportScheduleSource : IAirportScheduleSource
         {
             await process.WaitForExitAsync(timeoutCts.Token);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             TryKill(process);
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
             throw new TimeoutException(
                 $"Timed out after {_timeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture)}s while loading AirNavRadar schedules for {normalizedIcao}.");
         }
