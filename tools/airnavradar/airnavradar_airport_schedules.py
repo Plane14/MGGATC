@@ -192,13 +192,14 @@ async def load_snapshot(airport_icao: str, timeout_seconds: int, headless: bool)
             }
 
             try:
-                any_success = False
+                all_success = True
                 for direction, key in SEARCH_KEYS.items():
                     fetch_result = await fetch_endpoint(tab, f"/data/airports/search/{airport_icao}?key={key}")
                     status = int(fetch_result.get("status", 0))
                     body = fetch_result.get("body", "")
 
                     if status != 200:
+                        all_success = False
                         last_error = (
                             f"{direction} fetch returned HTTP {status} while page title was "
                             f"{fetch_result.get('title', '<unknown>')!r}."
@@ -211,9 +212,8 @@ async def load_snapshot(airport_icao: str, timeout_seconds: int, headless: bool)
                         for item in extract_items(payload)
                         if (normalized := extract_schedule_entry(item, airport_icao, direction)) is not None
                     ]
-                    any_success = True
 
-                if any_success:
+                if all_success:
                     return {
                         "airportIcao": airport_icao,
                         "fetchedAtUtc": iso_utc_now(),

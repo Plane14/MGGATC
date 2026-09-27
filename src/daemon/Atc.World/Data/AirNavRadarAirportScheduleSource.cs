@@ -61,11 +61,15 @@ public class AirNavRadarAirportScheduleSource : IAirportScheduleSource
 
         try
         {
-            await process.WaitForExitAsync(timeoutCts.Token);
+            await Task.WhenAll(
+                process.WaitForExitAsync(timeoutCts.Token),
+                stdoutTask,
+                stderrTask);
         }
         catch (OperationCanceledException)
         {
             TryKill(process);
+            await Task.WhenAll(process.WaitForExitAsync(), stdoutTask, stderrTask);
 
             if (cancellationToken.IsCancellationRequested)
             {
