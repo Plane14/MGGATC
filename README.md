@@ -32,7 +32,7 @@ We appreciate feedback and suggestions. If you would like certain features to be
                        +-- sounds
    ```
 1. Start X-Plane and start a flight at an airport or your choice
-1. In the main menu, select **Plugins** -> **Air Traffic and Control** -> **Start World**
+1. In the main menu, select **Plugins** -> **Air Traffic and Control** and choose one of the **Start World** load options
 
 ### What to expect by far
 
@@ -122,4 +122,3 @@ AT&C includes open source software, namely these awesome libraries and tools:
 - [XPMP2 library](https://github.com/TwinFan/XPMP2) licensed under [MIT](https://github.com/TwinFan/XPMP2/blob/master/LICENSE)
 - [moodycamel::ConcurrentQueue](https://github.com/cameron314/concurrentqueue) library licensed under [Simplified BSD License](https://github.com/cameron314/concurrentqueue/blob/master/LICENSE.md)
 - [Google Test library](https://github.com/google/googletest) licensed under [BSD-3-Clause](https://github.com/google/googletest/blob/master/LICENSE) license.
-

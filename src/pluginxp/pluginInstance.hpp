@@ -57,11 +57,12 @@ private:
     enum class PluginStateId
     {
         Stopped = 0,
-        WorldAssembling = 1,
-        WorldAssembled = 2,
-        SchedulesStarting = 3,
-        SchedulesStarted = 4,
-        Failed = 5
+        Idle = 1,
+        WorldAssembling = 2,
+        WorldAssembled = 3,
+        SchedulesStarting = 4,
+        SchedulesStarted = 5,
+        Failed = 6
     };
 
     class PluginState
@@ -137,12 +138,60 @@ private:
         }
     };
 
+    class IdleState : public PluginState
+    {
+    private:
+        shared_ptr<HostServices> m_host;
+        PluginMenu::Item m_startWorld100Item;
+        PluginMenu::Item m_startWorld70Item;
+        PluginMenu::Item m_startWorld50Item;
+    public:
+        IdleState(
+            shared_ptr<HostServices> _host,
+            PluginMenu& _menu,
+            function<void(float loadFactor)> _onStartWorld
+        ) : PluginState(PluginStateId::Idle, "IDLE"),
+            m_host(std::move(_host)),
+            m_startWorld100Item(_menu, "Start World - 100% load", [=]{ _onStartWorld(1.0f); }),
+            m_startWorld70Item(_menu, "Start World - 70% load", [=]{ _onStartWorld(0.7f); }),
+            m_startWorld50Item(_menu, "Start World - 50% load", [=]{ _onStartWorld(0.5f); })
+        {
+        }
+    public:
+        void enter() override
+        {
+            stopServer();
+        }
+    private:
+        void stopServer()
+        {
+#if IBM
+            auto server = m_host->services().get<server::ServerControllerInterface>();
+
+            if (server->running())
+            {
+                m_host->writeLog("PLUGIN|stopping the server");
+                server->beginStop();
+                if (server->waitUntilStopped(chrono::seconds(5)))
+                {
+                    m_host->writeLog("PLUGIN|server successfully stopped");
+                }
+                else
+                {
+                    m_host->writeLog("PLUGIN|WARNING: timeout waiting for server to stop");
+                }
+            }
+#endif
+        }
+    };
+
     class WorldAssemblingState : public PluginState
     {
     private:
         shared_ptr<PluginHostServices> m_host;
         future<shared_ptr<World>> m_worldFuture;
         atomic<bool> m_done;
+        chrono::steady_clock::time_point m_nextProgressLogAt;
         PluginMenu::Item m_assemblingItem;
         function<void(shared_ptr<World> world)> m_onAssembled;
         function<void()> m_onFailed;
@@ -154,6 +203,7 @@ private:
             function<void()> _onFailed
         ) : PluginState(PluginStateId::WorldAssembling, "WORLD-ASSEMBLING"),
             m_host(std::move(_host)),
+            m_nextProgressLogAt(chrono::steady_clock::now()),
             m_assemblingItem(_menu, "World is being assembled, please wait...", [](){}),
             m_onAssembled(std::move(_onAssembled)),
             m_onFailed(std::move(_onFailed)),
@@ -196,7 +246,12 @@ private:
         {
             if (m_worldFuture.wait_for(chrono::milliseconds(0)) != future_status::ready)
             {
-                m_host->writeLog("PLUGIN|ping WORLD-ASSEMBLING: in progress");
+                auto now = chrono::steady_clock::now();
+                if (now >= m_nextProgressLogAt)
+                {
+                    m_host->writeLog("PLUGIN|ping WORLD-ASSEMBLING: in progress");
+                    m_nextProgressLogAt = now + chrono::seconds(5);
+                }
             }
             else if (m_worldFuture.valid())
             {
@@ -572,8 +627,8 @@ public:
         PrintDebugString("PLUGIN|initializing PluginInstance");
 
         m_hostServices = createHostServices();
-        transitionToState([this]() { return createWorldAssemblingState(); });
-        XPLMRegisterFlightLoopCallback(&pluginFlightLoopCallback, -1.0, this);
+        transitionToState([this]() { return createIdleState(); });
+        XPLMRegisterFlightLoopCallback(&pluginFlightLoopCallback, 1.0, this);
     }
 
     ~PluginInstance()
@@ -696,6 +751,16 @@ private:
         return make_shared<StoppedState>(m_hostServices);
     }
 
+    shared_ptr<PluginState> createIdleState()
+    {
+        return make_shared<IdleState>(m_hostServices, m_menu, [this](float loadFactor) {
+            m_schedulesLoadFactor = loadFactor;
+            transitionToState([this]() {
+                return createWorldAssemblingState();
+            });
+        });
+    }
+
     shared_ptr<PluginState> createWorldAssemblingState()
     {
         const auto onAssembled = [this](shared_ptr<World> world) {
@@ -766,11 +831,11 @@ private:
         return make_shared<FailedState>();
     }
 
-    void flightLoopTick()
+    float flightLoopTick()
     {
         if (!m_currentState)
         {
-            return;
+            return 1.0f;
         }
 
         try
@@ -784,6 +849,8 @@ private:
                 m_currentState->name().c_str(),
                 e.what());
         }
+
+        return m_currentState->id() == PluginStateId::SchedulesStarted ? -1.0f : 1.0f;
     }
 
 private:
@@ -801,10 +868,10 @@ private:
     {
         if (inRefcon)
         {
-            static_cast<PluginInstance*>(inRefcon)->flightLoopTick();
+            return static_cast<PluginInstance*>(inRefcon)->flightLoopTick();
         }
 
-        return -1;
+        return 1.0f;
     }
 
 };
