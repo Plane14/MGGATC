@@ -107,6 +107,8 @@ namespace ai
 
         void clearFlights() override
         {
+            AIControllerBase::clearFlights();
+
             for (const auto& mutexEntry : m_activeRunwayMutex)
             {
                 mutexEntry.second->clearFlights();

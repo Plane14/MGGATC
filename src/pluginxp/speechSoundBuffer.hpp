@@ -170,10 +170,15 @@ private:
 
             const auto& header = reader->header();
 
-            if (header.channelCount)
-                format = (header.bytesPerSample == 1) ? AL_FORMAT_MONO8 : AL_FORMAT_MONO16;
-            else
-                format = (header.bytesPerSample == 1) ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16;
+            if (header.channelCount == 0)
+            {
+                throw ALSoundBuffer::SoundBufferError("LoadWav: channel count is zero");
+            }
+
+            const bool isMono = (header.channelCount == 1);
+            format = isMono
+                ? ((header.bytesPerSample == 1) ? AL_FORMAT_MONO8 : AL_FORMAT_MONO16)
+                : ((header.bytesPerSample == 1) ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16);
 
             freq = header.frequency;
             if (sizeof(freq) != sizeof(header.frequency))

@@ -94,6 +94,8 @@ namespace ai
 
         void clearFlights() override
         {
+            m_clearedForDepartureTaxi.clear();
+            m_departureTaxiHandedOffToTower.clear();
         }
 
     protected:
