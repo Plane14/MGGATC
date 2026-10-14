@@ -10,6 +10,8 @@
 #include <memory>
 #include <thread>
 #include <future>
+#include <atomic>
+#include <mutex>
 
 // SDK
 #include "XPLMPlugin.h"
@@ -165,20 +167,24 @@ private:
 
         void enter() override
         {
-            m_worldFuture = std::async(std::launch::async, [this] {
+            auto host = m_host;
+
+            m_worldFuture = std::async(std::launch::async, [host]() -> shared_ptr<World> {
                 try
                 {
-                    auto world = assembleWorld();
+                    PluginWorldLoader loader(host);
+                    loader.loadWorld();
+                    auto world = loader.getWorld();
                     if (world)
                     {
-                        m_host->useWorld(world);
-                        startServer();
+                        host->useWorld(world);
+                        tryStartServer(host);
                     }
                     return world;
                 }
                 catch (const exception& e)
                 {
-                    m_host->writeLog("PLUGIN|WorldAssemblingState background task CRASHED!!! %s", e.what());
+                    host->writeLog("PLUGIN|WorldAssemblingState background task CRASHED!!! %s", e.what());
                     return shared_ptr<World>();
                 }
             });
@@ -186,9 +192,11 @@ private:
 
         void exit() override
         {
-            if (!m_done && m_worldFuture.wait_for(chrono::milliseconds(0)) != future_status::ready)
+            if (!m_done && m_worldFuture.valid() &&
+                m_worldFuture.wait_for(chrono::milliseconds(0)) != future_status::ready)
             {
                 m_host->writeLog("PLUGIN|WARNING: leaving WORLD-ASSEMBLING state while the assembly is still in progress!");
+                parkFuture(m_worldFuture);
             }
         }
 
@@ -218,37 +226,22 @@ private:
 
     private:
 
-        shared_ptr<World> assembleWorld()
-        {
-            try
-            {
-                PluginWorldLoader loader(m_host);
-                loader.loadWorld();
-                return loader.getWorld();
-            }
-            catch (const exception& e)
-            {
-                m_host->writeLog("PLUGIN|assembleWorld CRASHED!!! %s", e.what());
-                return shared_ptr<World>();
-            }
-        }
-
-        void startServer()
+        static void tryStartServer(shared_ptr<HostServices> host)
         {
 #if IBM
             try
             {
-                auto server = m_host->services().get<server::ServerControllerInterface>();
+                auto server = host->services().get<server::ServerControllerInterface>();
 
                 if (!server->running())
                 {
-                    m_host->writeLog("PLUGIN|starting the server");
+                    host->writeLog("PLUGIN|starting the server");
                     server->start(9002);
                 }
             }
             catch (const exception& e)
             {
-                m_host->writeLog("PLUGIN|startServer CRASHED!!! %s", e.what());
+                host->writeLog("PLUGIN|startServer CRASHED!!! %s", e.what());
             }
 #endif
         }
@@ -278,66 +271,228 @@ private:
     class SchedulesStartingState : public PluginState
     {
     private:
+        struct SchedulesLoadResult
+        {
+            shared_ptr<Airport> airport;
+            string error;
+        };
+
         shared_ptr<HostServices> m_host;
         shared_ptr<World> m_world;
         float m_loadFactor;
         PluginMenu::Item m_worldIsStarting;
+        PluginMenu::Item m_cancelItem;                             // "Cancel loading schedules"
         function<void(shared_ptr<Airport> userAirport)> m_onStarted;
-        shared_ptr<Airport> m_userAirport;
+        function<void(const string& error)> m_onFailed;
+        shared_ptr<DemoScheduleLoader> m_loader;
+        shared_ptr<SchedulesLoadResult> m_loadResult;
+        future<shared_ptr<SchedulesLoadResult>> m_loadFuture;
+        bool m_done = false;
+        bool m_cancelRequestedByUser = false;
     public:
+        // constructor: add a 6th parameter _onFailed (function<void(const string&)>) AFTER _onStarted
         SchedulesStartingState(
             shared_ptr<HostServices> _host,
             shared_ptr<World> _world,
             PluginMenu& _menu,
             float _loadFactor,
-            function<void(shared_ptr<Airport> userAirport)> _onStarted
+            function<void(shared_ptr<Airport> userAirport)> _onStarted,
+            function<void(const string& error)> _onFailed
         ) : PluginState(PluginStateId::SchedulesStarting, "SCHEDULES-STARTING"),
             m_host(std::move(_host)),
             m_world(_world),
             m_worldIsStarting(_menu, "Starting schedules, please wait...", [](){}),
+            m_cancelItem(_menu, "Cancel loading schedules", [this](){ cancelLoading(); }),
             m_loadFactor(_loadFactor),
-            m_onStarted(std::move(_onStarted))
+            m_onStarted(std::move(_onStarted)),
+            m_onFailed(std::move(_onFailed))
         {
         }
 
         void enter() override
         {
-            DemoScheduleLoader scheduleLoader(m_host, m_world);
-            scheduleLoader.loadSchedules(m_loadFactor);
+            m_loadResult = make_shared<SchedulesLoadResult>();
+            m_loader = make_shared<DemoScheduleLoader>(m_host, m_world);
+            auto loader = m_loader;
+            auto loadFactor = m_loadFactor;
+            auto result = m_loadResult;
 
-            m_host->writeLog(
-                "PLUGIN|The world now has [%d] airports, [%d] control facilities, [%d] AI flights",
-                m_world->airports().size(),
-                m_world->controlFacilities().size(),
-                m_world->flights().size());
+            try
+            {
+                loader->prepare();   // main-thread-only phase (XPLM nav + CSL scan)
+            }
+            catch (const exception& e)
+            {
+                result->error = e.what();
+                // ping() will report this failure
+                return;
+            }
 
-            m_userAirport = scheduleLoader.airport();
-            WorldBuilder::tidyAirportElevations(m_host, m_userAirport);
-
-            logUserAirportElevations();
+            try
+            {
+                m_loadFuture = std::async(std::launch::async, [loader, loadFactor, result]() {
+                    try
+                    {
+                        loader->loadSchedules(loadFactor);
+                    }
+                    catch (const exception& e)
+                    {
+                        result->error = e.what();
+                    }
+                    result->airport = loader->airport();
+                    return result;
+                });
+            }
+            catch (const exception& e)
+            {
+                result->error = e.what();
+                // ping() will report this failure
+            }
         }
 
         void ping() override
         {
-            m_onStarted(m_userAirport);
+            if (m_done)
+            {
+                return;
+            }
+
+            if (m_cancelRequestedByUser)
+            {
+                // The cancel request comes from a menu handler, so the transition into the
+                // next state is deferred to this callback to keep the menu item alive until
+                // X-Plane is done dispatching it. The loading checks the cancel flag between
+                // its steps, so we simply wait for it to stop here.
+                if (!m_loadFuture.valid() ||
+                    m_loadFuture.wait_for(chrono::milliseconds(0)) == future_status::ready)
+                {
+                    if (m_loadFuture.valid())
+                    {
+                        try { m_loadFuture.get(); } catch (const exception&) {}
+                    }
+
+                    finish(nullptr, string("cancelled by the user"));
+                }
+
+                return;
+            }
+
+            if (!m_loadFuture.valid())
+            {
+                // prepare() failed on the main thread, nothing is loading
+                finish(nullptr, m_loadResult ? m_loadResult->error : string("schedule preparation failed"));
+                return;
+            }
+
+            if (m_loadFuture.wait_for(chrono::milliseconds(0)) != future_status::ready)
+            {
+                return;   // still loading, keep the sim responsive
+            }
+
+            shared_ptr<SchedulesLoadResult> result;
+            try
+            {
+                result = m_loadFuture.get();
+            }
+            catch (const exception& e)
+            {
+                finish(nullptr, e.what());
+                return;
+            }
+
+            finish(result->airport, result->error);
         }
 
-    private:
-
-        void logUserAirportElevations()
+        void exit() override
         {
-            const auto logRunwayEndElevation = [this](const Runway::End& end) {
+            if (m_loader && !m_done)
+            {
+                m_loader->requestCancel();
+
+                // Give the background task a bounded window to stop cleanly so that it cannot
+                // keep touching the world while the user retries the schedule load. Loading
+                // checks the cancel flag between flights/route lookups, so the wait normally
+                // ends within the currently running fetch step.
+                for (int attempt = 0 ; attempt < 50 ; attempt++)
+                {
+                    if (!m_loadFuture.valid())
+                    {
+                        return;
+                    }
+
+                    if (m_loadFuture.wait_for(chrono::milliseconds(0)) == future_status::ready)
+                    {
+                        try { m_loadFuture.get(); } catch (const exception&) {}
+                        return;
+                    }
+
+                    this_thread::sleep_for(chrono::milliseconds(100));
+                }
+
+                m_host->writeLog("PLUGIN|WARNING: leaving SCHEDULES-STARTING state while schedules are still loading");
+                parkFuture(m_loadFuture);
+            }
+        }
+    private:
+        void cancelLoading()
+        {
+            if (m_loader && !m_done && !m_cancelRequestedByUser)
+            {
+                m_cancelRequestedByUser = true;
+                m_loader->requestCancel();
+                m_host->writeLog("PLUGIN|cancel requested: schedules are still being loaded");
+            }
+        }
+
+        void finish(shared_ptr<Airport> airport, const string& error)
+        {
+            m_done = true;
+            m_loader.reset();
+
+            if (!error.empty())
+            {
+                m_host->writeLog("PLUGIN|schedule loading finished with errors: %s", error.c_str());
+            }
+
+            if (airport)
+            {
+                try
+                {
+                    WorldBuilder::tidyAirportElevations(m_host, airport);
+                    logUserAirportElevations(airport);
+                    m_host->writeLog(
+                        "PLUGIN|The world now has [%d] airports, [%d] control facilities, [%d] AI flights",
+                        m_world->airports().size(),
+                        m_world->controlFacilities().size(),
+                        m_world->flights().size());
+                }
+                catch (const exception& e)
+                {
+                    m_host->writeLog("PLUGIN|post-load tidy-up CRASHED!!! %s", e.what());
+                }
+
+                m_onStarted(airport);   // transitions the state machine; do not touch members after this call
+                return;
+            }
+
+            m_host->writeLog("PLUGIN|ERROR: schedules were not loaded - see previous errors");
+            m_onFailed(error);
+        }
+
+        void logUserAirportElevations(shared_ptr<Airport> userAirport) // was: no parameter, used m_userAirport
+        {
+            const auto logRunwayEndElevation = [this, userAirport](const Runway::End& end) {
                 const auto& centerlinePoint = end.centerlinePoint().geo();
                 m_host->writeLog(
                     "PLUGIN|User airport elevations [%s/%s] at (%f,%f) elevation [%f]",
-                    m_userAirport->header().icao().c_str(),
+                    userAirport->header().icao().c_str(),
                     end.name().c_str(),
                     centerlinePoint.latitude,
                     centerlinePoint.longitude,
                     end.elevationFeet());
             };
 
-            for (const auto& runway : m_userAirport->runways())
+            for (const auto& runway : userAirport->runways())
             {
                 logRunwayEndElevation(runway->end1());
                 logRunwayEndElevation(runway->end2());
@@ -450,20 +605,41 @@ private:
 
         void tuneToClearance()
         {
-            auto clearance = m_userAirport->clearanceDeliveryAt(m_userAirport->header().datum());
-            m_com1FrequencyKhz = clearance->frequency()->khz();
+            try
+            {
+                auto clearance = m_userAirport->clearanceDeliveryAt(m_userAirport->header().datum());
+                m_com1FrequencyKhz = clearance->frequency()->khz();
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog("PLUGIN|%s CRASHED!!! %s", "tuneToClearance", e.what());
+            }
         }
 
         void tuneToGround()
         {
-            auto ground = m_userAirport->groundAt(m_userAirport->header().datum());
-            m_com1FrequencyKhz = ground->frequency()->khz();
+            try
+            {
+                auto ground = m_userAirport->groundAt(m_userAirport->header().datum());
+                m_com1FrequencyKhz = ground->frequency()->khz();
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog("PLUGIN|%s CRASHED!!! %s", "tuneToGround", e.what());
+            }
         }
 
         void tuneToTower()
         {
-            auto tower = m_userAirport->localAt(m_userAirport->header().datum());
-            m_com1FrequencyKhz = tower->frequency()->khz();
+            try
+            {
+                auto tower = m_userAirport->localAt(m_userAirport->header().datum());
+                m_com1FrequencyKhz = tower->frequency()->khz();
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog("PLUGIN|%s CRASHED!!! %s", "tuneToTower", e.what());
+            }
         }
 
         void toggleAIAircraftLabels()
@@ -482,75 +658,95 @@ private:
 
         void initUserFlight()
         {
-            auto world = m_host->getWorld();
-            auto departureTime = world->currentTime() + 30 * 60; //P-30
-            auto arrivalTime = departureTime + 3 * 60 * 60; //3h
-            auto userAircraft = UserAircraft::create(m_host);
-            string flightNo = to_string(1);
-            string callSign = flightNo;
-            AirlineReferenceTable::Entry airline;
-            if (!userAircraft->airlineIcao().empty() && AirlineReferenceTable::tryFindByIcao(userAircraft->airlineIcao(), airline))
+            try
             {
-                callSign = airline.callsign + " " + flightNo;
-            }
-            const auto defaultArrivalAirport = [this, world]()->string {
-                for (const auto& airport : world->airports())
+                string departureRunwayName;
+                const auto& activeDepartureRunways = m_userAirport->activeDepartureRunways();
+                if (!activeDepartureRunways.empty())
                 {
-                    if (airport->header().icao() != m_userAirport->header().icao())
-                    {
-                        return airport->header().icao();
-                    }
+                    departureRunwayName = activeDepartureRunways.at(0);
+                }
+                else
+                {
+                    m_host->writeLog(
+                        "UPILOT|INIT WARNING: no active departure runways at [%s], falling back to the longest runway",
+                        m_userAirport->header().icao().c_str());
+                    departureRunwayName = m_userAirport->findLongestRunway()->end1().name();
                 }
 
-                return m_userAirport->header().icao();
-            }();
+                auto world = m_host->getWorld();
+                auto departureTime = world->currentTime() + 30 * 60; //P-30
+                auto arrivalTime = departureTime + 3 * 60 * 60; //3h
+                auto userAircraft = UserAircraft::create(m_host);
+                string flightNo = to_string(1);
+                string callSign = flightNo;
+                AirlineReferenceTable::Entry airline;
+                if (!userAircraft->airlineIcao().empty() && AirlineReferenceTable::tryFindByIcao(userAircraft->airlineIcao(), airline))
+                {
+                    callSign = airline.callsign + " " + flightNo;
+                }
+                const auto defaultArrivalAirport = [this, world]()->string {
+                    for (const auto& airport : world->airports())
+                    {
+                        if (airport->header().icao() != m_userAirport->header().icao())
+                        {
+                            return airport->header().icao();
+                        }
+                    }
 
-            auto flightPlan = shared_ptr<FlightPlan>(new FlightPlan(
-                departureTime,
-                arrivalTime,
-                m_userAirport->header().icao(),
-                defaultArrivalAirport));
+                    return m_userAirport->header().icao();
+                }();
 
-            auto userFlight = shared_ptr<Flight>(new Flight(
-                m_host,
-                1,
-                Flight::RulesType::IFR,
-                userAircraft->airlineIcao(),
-                flightNo,
-                callSign,
-                flightPlan));
+                auto flightPlan = shared_ptr<FlightPlan>(new FlightPlan(
+                    departureTime,
+                    arrivalTime,
+                    m_userAirport->header().icao(),
+                    defaultArrivalAirport));
 
-            m_host->writeLog("initUserFlight:2");
+                auto userFlight = shared_ptr<Flight>(new Flight(
+                    m_host,
+                    1,
+                    Flight::RulesType::IFR,
+                    userAircraft->airlineIcao(),
+                    flightNo,
+                    callSign,
+                    flightPlan));
 
-            auto departureGate = m_userAirport->findClosestParkingStand(userAircraft->location());
-            auto departureRunway = m_userAirport->activeDepartureRunways().at(0);
-            flightPlan->setDepartureGate(departureGate ? departureGate->name() : "N/A");
-            flightPlan->setDepartureRunway(departureRunway);
+                m_host->writeLog("initUserFlight:2");
 
-            m_host->writeLog(
-                "UPILOT|INIT departure gate=[%s] runway=[%s]",
-                flightPlan->departureGate().c_str(), flightPlan->departureRunway().c_str());
+                auto departureGate = m_userAirport->findClosestParkingStand(userAircraft->location());
+                flightPlan->setDepartureGate(departureGate ? departureGate->name() : "N/A");
+                flightPlan->setDepartureRunway(departureRunwayName);
 
-            userFlight->setAircraft(userAircraft);
+                m_host->writeLog(
+                    "UPILOT|INIT departure gate=[%s] runway=[%s]",
+                    flightPlan->departureGate().c_str(), departureRunwayName.c_str());
 
-            m_host->writeLog("initUserFlight:4");
+                userFlight->setAircraft(userAircraft);
 
-            auto userPilot = UserPilot::create(m_host, "Bob", Actor::Gender::Male, userFlight);
+                m_host->writeLog("initUserFlight:4");
 
-            m_host->writeLog("initUserFlight:5");
+                auto userPilot = UserPilot::create(m_host, "Bob", Actor::Gender::Male, userFlight);
 
-            userFlight->setPilot(userPilot);
+                m_host->writeLog("initUserFlight:5");
 
-            m_host->writeLog("initUserFlight:6");
+                userFlight->setPilot(userPilot);
 
-            m_userPilotWorkflow = shared_ptr<UserPilotAssistantWorkflow>(new UserPilotAssistantWorkflow(
-                m_host,
-                userFlight,
-                m_userAirport));
+                m_host->writeLog("initUserFlight:6");
 
-            m_world->addFlight(userFlight);
+                m_userPilotWorkflow = shared_ptr<UserPilotAssistantWorkflow>(new UserPilotAssistantWorkflow(
+                    m_host,
+                    userFlight,
+                    m_userAirport));
 
-            m_host->writeLog("initUserFlight:7");
+                m_world->addFlight(userFlight);
+
+                m_host->writeLog("initUserFlight:7");
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog("UPILOT|INIT CRASHED!!! %s", e.what());
+            }
         }
     };
 
@@ -604,6 +800,13 @@ public:
                     return createSchedulesStartingState();
                 });
                 break;
+            case PluginStateId::Failed:
+                transitionToState([this]() {
+                    return m_world
+                        ? shared_ptr<PluginState>(createWorldAssembledState())
+                        : shared_ptr<PluginState>(createWorldAssemblingState());
+                });
+                break;
             }
         }
         catch (const exception& e)
@@ -613,6 +816,17 @@ public:
     }
 
 private:
+
+    // Keeps futures of abandoned async loads alive: destroying a std::async future blocks
+    // until the task completes, which would stall the main thread.
+    template <typename T>
+    static void parkFuture(future<T>& futureToPark)
+    {
+        static mutex parkedFuturesMutex;
+        static vector<future<T>> parkedFutures;
+        lock_guard<mutex> guard(parkedFuturesMutex);
+        parkedFutures.push_back(std::move(futureToPark));
+    }
 
     shared_ptr<PluginHostServices> createHostServices()
     {
@@ -676,18 +890,27 @@ private:
 
         try
         {
-            m_currentState = factory();
+            auto nextState = factory();
 
-            if (m_currentState)
+            if (nextState)
             {
-                m_hostServices->writeLog("PLUGIN|entering state[%s]", m_currentState->name().c_str());
-                m_currentState->enter();
+                nextState->enter();
+                m_currentState = nextState;
                 m_hostServices->writeLog("PLUGIN|transitioned to state[%s]", m_currentState->name().c_str());
             }
         }
         catch (const exception &e)
         {
             PrintDebugString("PLUGIN|CRASHED while transitioning state (enter)!!! %s", e.what());
+            m_currentState = createFailedState();
+            try
+            {
+                m_currentState->enter();
+            }
+            catch (const exception &e2)
+            {
+                PrintDebugString("PLUGIN|CRASHED while entering FAILED state!!! %s", e2.what());
+            }
         }
     }
 
@@ -735,6 +958,12 @@ private:
             [this](shared_ptr<Airport> userAirport) {
                 transitionToState([this, userAirport]() {
                     return createSchedulesStartedState(userAirport);
+                });
+            },
+            [this](const string& error) {
+                m_hostServices->writeLog("PLUGIN|schedules were not loaded (%s), offering to try again", error.c_str());
+                transitionToState([this]() {
+                    return createWorldAssembledState();
                 });
             }
         );

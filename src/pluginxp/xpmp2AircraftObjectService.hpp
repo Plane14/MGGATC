@@ -347,6 +347,7 @@ public:
     void clearAll() override
     {
         m_simAircraft.clear();
+        m_lastChangeSet.reset();
     }
 
 private:

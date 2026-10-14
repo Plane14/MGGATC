@@ -17,12 +17,17 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <atomic>
 
 #if IBM
 #include <windows.h>
 #else
 #include <sys/wait.h>
 #include <unistd.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <cerrno>
 #endif
 
 // SDK
@@ -41,6 +46,8 @@
 using namespace std;
 using namespace PPL;
 using namespace world;
+
+static const int kExecuteCommandTimeoutSeconds = 60;
 
 class DemoScheduleLoader
 {
@@ -75,22 +82,48 @@ private:
     DataRef<double> m_userAircraftLatitude;
     DataRef<double> m_userAircraftLongitude;
     shared_ptr<Airport> m_airport;
+    bool m_prepared = false;
+    vector<AircraftOption> m_aircraftOptions;
+    GeoPoint m_userAircraftLocation;
+    shared_ptr<atomic<bool>> m_cancelRequested;
 public:
     DemoScheduleLoader(shared_ptr<HostServices> _host, shared_ptr<World> _world) :
         m_host(_host),
         m_world(_world),
         m_userAircraftLatitude("sim/flightmodel/position/latitude", PPL::ReadOnly),
-        m_userAircraftLongitude("sim/flightmodel/position/longitude", PPL::ReadOnly)
+        m_userAircraftLongitude("sim/flightmodel/position/longitude", PPL::ReadOnly),
+        m_cancelRequested(make_shared<atomic<bool>>(false))
     {
     }
+
+private:
+
+    bool isCancelRequested() const { return m_cancelRequested && m_cancelRequested->load(); }
+
 public:
-    void loadSchedules(float loadFactor)
+    void prepare()
     {
+        m_userAircraftLocation = GeoPoint((float)m_userAircraftLatitude, (float)m_userAircraftLongitude);
+        m_aircraftOptions = findAvailableAircraftOptions();
         string userAirportIcao = getUserAirportIcao();
         m_airport = m_world->getAirport(userAirportIcao);
         m_airport->selectActiveRunways();
         m_airport->selectArrivalAndDepartureTaxiways();
         logActiveRunwaysBounds();
+        m_prepared = true;
+    }
+
+    void loadSchedules(float loadFactor)
+    {
+        if (!m_prepared)
+        {
+            prepare();
+        }
+
+        if (!(loadFactor > 0.0f))
+        {
+            loadFactor = 0.7f;
+        }
 
         m_host->writeLog("SCHEDL|Loading AI schedules at airport[%s]", m_airport->header().icao().c_str());
 
@@ -131,6 +164,19 @@ public:
             "SCHEDL|Loaded [%d] AI flights at airport[%s]",
             m_world->flights().size(),
             m_airport->header().icao().c_str());
+
+        if (isCancelRequested())
+        {
+            m_host->writeLog("SCHEDL|Schedule loading was cancelled before completion");
+        }
+    }
+
+    void requestCancel()
+    {
+        if (m_cancelRequested)
+        {
+            m_cancelRequested->store(true);
+        }
     }
 
 public:
@@ -330,7 +376,33 @@ private:
         }
 
         CloseHandle(readPipe);
-        WaitForSingleObject(processInfo.hProcess, INFINITE);
+        const DWORD commandTimeoutMs = kExecuteCommandTimeoutSeconds * 1000;
+        const DWORD commandStartTick = GetTickCount();
+        DWORD waitResult = WAIT_TIMEOUT;
+        while (true)
+        {
+            if (m_cancelRequested && m_cancelRequested->load())
+            {
+                TerminateProcess(processInfo.hProcess, 1);
+                CloseHandle(processInfo.hProcess);
+                CloseHandle(processInfo.hThread);
+                throw runtime_error(arguments.at(0) + " was cancelled");
+            }
+
+            waitResult = WaitForSingleObject(processInfo.hProcess, 250);
+            if (waitResult != WAIT_TIMEOUT)
+            {
+                break;
+            }
+
+            if ((GetTickCount() - commandStartTick) >= commandTimeoutMs)
+            {
+                TerminateProcess(processInfo.hProcess, 1);
+                CloseHandle(processInfo.hProcess);
+                CloseHandle(processInfo.hThread);
+                throw runtime_error(arguments.at(0) + " timed out after " + to_string(kExecuteCommandTimeoutSeconds) + " seconds");
+            }
+        }
 
         DWORD exitCode = 0;
         GetExitCodeProcess(processInfo.hProcess, &exitCode);
@@ -377,16 +449,100 @@ private:
         }
 
         close(outputPipe[1]);
+
+        if (fcntl(outputPipe[0], F_SETFL, O_NONBLOCK) != 0)
+        {
+            close(outputPipe[0]);
+            kill(processId, SIGKILL);
+            int pipeSetupExitStatus = 0;
+            waitpid(processId, &pipeSetupExitStatus, 0);
+            throw runtime_error(arguments.at(0) + " could not configure output pipe");
+        }
+
         string output;
         char buffer[4096];
         ssize_t bytesRead = 0;
-        while ((bytesRead = read(outputPipe[0], buffer, sizeof(buffer))) > 0)
+        int exitStatus = 0;
+        bool timedOut = false;
+
+        struct pollfd pfd;
+        pfd.fd = outputPipe[0];
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+
+        const auto readDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(kExecuteCommandTimeoutSeconds);
+        while (true)
         {
-            output.append(buffer, bytesRead);
+            const auto remainingMs =
+                std::chrono::duration_cast<std::chrono::milliseconds>(readDeadline - std::chrono::steady_clock::now()).count();
+            if (remainingMs <= 0)
+            {
+                timedOut = true;
+                break;
+            }
+
+            const int pollIntervalMs = (remainingMs < 250) ? (int)remainingMs : 250;
+            const int pollResult = poll(&pfd, 1, pollIntervalMs);
+
+            if (m_cancelRequested && m_cancelRequested->load())
+            {
+                kill(processId, SIGKILL);
+                close(outputPipe[0]);
+                waitpid(processId, &exitStatus, 0);
+                throw runtime_error(arguments.at(0) + " was cancelled");
+            }
+
+            if (pollResult == 0)
+            {
+                timedOut = true;
+                break;
+            }
+
+            if (pollResult < 0)
+            {
+                if (errno == EINTR)
+                {
+                    continue;
+                }
+
+                close(outputPipe[0]);
+                kill(processId, SIGKILL);
+                waitpid(processId, &exitStatus, 0);
+                throw runtime_error("poll failed");
+            }
+
+            bytesRead = read(outputPipe[0], buffer, sizeof(buffer));
+            if (bytesRead > 0)
+            {
+                output.append(buffer, bytesRead);
+                continue;
+            }
+
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+            {
+                continue;
+            }
+
+            close(outputPipe[0]);
+            kill(processId, SIGKILL);
+            waitpid(processId, &exitStatus, 0);
+            throw runtime_error("read failed");
+        }
+
+        if (timedOut)
+        {
+            kill(processId, SIGKILL);
+            close(outputPipe[0]);
+            waitpid(processId, &exitStatus, 0);
+            throw runtime_error(arguments.at(0) + " timed out after " + to_string(kExecuteCommandTimeoutSeconds) + " seconds");
         }
 
         close(outputPipe[0]);
-        int exitStatus = 0;
         waitpid(processId, &exitStatus, 0);
         if (!WIFEXITED(exitStatus) || WEXITSTATUS(exitStatus) != 0)
         {
@@ -737,7 +893,14 @@ private:
             optionsToUse = &genericMatches;
         }
 
-        return optionsToUse->at((index - 1) % optionsToUse->size());
+        const size_t optionCount = optionsToUse->size();
+        if (optionCount == 0)
+        {
+            throw runtime_error("selectAircraftOption: no aircraft options available");
+        }
+
+        const int safeIndex = (index <= 0) ? 0 : (index - 1);
+        return optionsToUse->at((size_t)safeIndex % optionCount);
     }
 
     shared_ptr<ParkingStand> assignGateForCandidate(
@@ -897,6 +1060,11 @@ private:
 
         for (size_t i = 0 ; i < acceptedSchedules.size() ; i++)
         {
+            if (isCancelRequested())
+            {
+                break;
+            }
+
             auto& schedule = acceptedSchedules[i];
             const auto& liveAircraft = schedule.candidate.aircraft;
             const auto& route = schedule.candidate.route;
@@ -988,7 +1156,7 @@ private:
 
     bool tryLoadRealSchedules(float loadFactor)
     {
-        vector<AircraftOption> aircraftOptions = findAvailableAircraftOptions();
+        vector<AircraftOption> aircraftOptions = m_aircraftOptions;
         if (aircraftOptions.empty())
         {
             m_host->writeLog("SCHEDL|No available CSL aircraft options found; cannot load real schedules");
@@ -1043,6 +1211,11 @@ private:
         vector<runtime_schedule::LiveScheduleCandidate> candidates;
         for (const auto& aircraft : routeLookupAircraft)
         {
+            if (isCancelRequested())
+            {
+                break;
+            }
+
             try
             {
                 runtime_schedule::RouteData route = fetchLiveRoute(aircraft);
@@ -1075,7 +1248,7 @@ private:
 
     bool tryLoadAirNavRadarSchedules(float loadFactor)
     {
-        vector<AircraftOption> aircraftOptions = findAvailableAircraftOptions();
+        vector<AircraftOption> aircraftOptions = m_aircraftOptions;
         if (aircraftOptions.empty())
         {
             m_host->writeLog("SCHEDL|No available CSL aircraft options found; cannot load AirNavRadar schedules");
@@ -1112,7 +1285,7 @@ private:
         string activeArrivalRunway1;
         string activeArrivalRunway2;
         int arrivalIndex = 0;
-        vector<AircraftOption> aircraftOptions = findAvailableAircraftOptions();
+        vector<AircraftOption> aircraftOptions = m_aircraftOptions;
         vector<shared_ptr<Airport>> routeAirportOptions = findRouteAirportOptions();
 
         if (aircraftOptions.empty())
@@ -1147,6 +1320,11 @@ private:
 
         for (const auto& gate : gates)
         {
+            if (isCancelRequested())
+            {
+                break;
+            }
+
             index++;
             int flightId = 100 + index;
             const AircraftOption aircraftOption = selectAircraftOption(aircraftOptions, gate, index);
@@ -1246,7 +1424,7 @@ private:
 
     vector<shared_ptr<ParkingStand>> findUsableStandsForSpecialFlights() const
     {
-        GeoPoint userAircraftLocation((float)m_userAircraftLatitude, (float)m_userAircraftLongitude);
+        const GeoPoint& userAircraftLocation = m_userAircraftLocation;
 
         const auto isUserAircraftParkedAtStand = [&](const shared_ptr<ParkingStand>& stand)->bool {
             return GeoMath::getDistanceMeters(userAircraftLocation, stand->location().geo()) < 50;
@@ -1571,6 +1749,11 @@ private:
 
         for (int i = 0 ; i < indices.size() && i < requestedCount ; i++)
         {
+            if (isCancelRequested())
+            {
+                break;
+            }
+
             const auto& stand = usableStands.at(indices.at(i));
             const SpecialTrafficRole role = chooseRole(stand);
             const vector<AircraftOption> options = buildSpecialOptions(role);
@@ -1637,37 +1820,30 @@ private:
 
     vector<shared_ptr<ParkingStand>> findUsableGatesForAIFlights() const
     {
-        GeoPoint userAircraftLocation((float)m_userAircraftLatitude, (float)m_userAircraftLongitude);
-
-        const int nameCheckBufferSize = 32;
-        char nameCheckBuffer[nameCheckBufferSize + 1] = { 0 };
+        const GeoPoint& userAircraftLocation = m_userAircraftLocation;
 
         const auto isUserAircraftParkedAtGate = [&](const shared_ptr<ParkingStand>& gate)->bool {
             auto distanceToUserAircraft = GeoMath::getDistanceMeters(userAircraftLocation, gate->location().geo());
             return (distanceToUserAircraft < 50);
         };
 
-        const auto isPassengerGateName = [&](const string& name)->bool {
-            strncpy(nameCheckBuffer, name.c_str(), nameCheckBufferSize);
-            for (int i = 0 ; i < name.length() && i < nameCheckBufferSize ; i++)
-            {
-                nameCheckBuffer[i] = toupper(nameCheckBuffer[i]);
-            }
+        const auto isPassengerGateName = [](const string& name)->bool {
+            const string upperName = runtime_schedule::upper(name);
             return (
-                !strstr(nameCheckBuffer, "HEL") &&
-                !strstr(nameCheckBuffer, "MILI") &&
-                !strstr(nameCheckBuffer, "RAMP") &&
-                (!strstr(nameCheckBuffer, "GA") || strstr(nameCheckBuffer, "GATE")) &&
-                !strstr(nameCheckBuffer, "G.A") &&
-                !strstr(nameCheckBuffer, "GENERAL") &&
-                !strstr(nameCheckBuffer, "GRASS") &&
-                !strstr(nameCheckBuffer, "DIRT") &&
-                !strstr(nameCheckBuffer, "FUEL") &&
-                !strstr(nameCheckBuffer, "CARGO") &&
-                !strstr(nameCheckBuffer, "HANG") &&
-                !strstr(nameCheckBuffer, "TIE") &&
-                !strstr(nameCheckBuffer, "MAINT") &&
-                !strstr(nameCheckBuffer, "DOCK"));
+                upperName.find("HEL") == string::npos &&
+                upperName.find("MILI") == string::npos &&
+                upperName.find("RAMP") == string::npos &&
+                (upperName.find("GA") == string::npos || upperName.find("GATE") != string::npos) &&
+                upperName.find("G.A") == string::npos &&
+                upperName.find("GENERAL") == string::npos &&
+                upperName.find("GRASS") == string::npos &&
+                upperName.find("DIRT") == string::npos &&
+                upperName.find("FUEL") == string::npos &&
+                upperName.find("CARGO") == string::npos &&
+                upperName.find("HANG") == string::npos &&
+                upperName.find("TIE") == string::npos &&
+                upperName.find("MAINT") == string::npos &&
+                upperName.find("DOCK") == string::npos);
         };
 
         const auto canUseGateForAIFlights = [&](const shared_ptr<ParkingStand>& gate)->bool {
