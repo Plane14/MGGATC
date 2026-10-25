@@ -143,6 +143,60 @@ namespace ai
         shared_ptr<FlightStrip> authorizedLuaw;
     };
 
+    /// ICAO Doc 4444 wake turbulence categories (Table 3-2).
+    /// These are used to determine separation minima between aircraft.
+    enum class WakeTurbulenceCategory
+    {
+        Light = 0,      ///< L - Light
+        Medium = 1,     ///< M - Medium
+        Heavy = 2,      ///< H - Heavy
+        Super = 3,      ///< J/S - Super (J = ICAO upper wake, S = FAA Super)
+        Helicopter = 4, ///< H - Helicopter-specific handling
+        Unknown = 5
+    };
+
+    /// ICAO Doc 4444 separation minima (Nautical Miles) for aircraft operating on
+    /// or intersecting the runway. These values come from Tables 3-4 through 3-10.
+    namespace wake_separation
+    {
+        // Arrival behind arrival (leader in front, follower on final)
+        // Leading: Super, Trailing: Light
+        constexpr double SUPER_BEHIND_LIGHT = 6.0;
+        constexpr double SUPER_BEHIND_MEDIUM = 6.0;
+        constexpr double SUPER_BEHIND_HEAVY = 6.0;
+        constexpr double SUPER_BEHIND_SUPER = 4.0;
+
+        constexpr double HEAVY_BEHIND_LIGHT = 5.0;
+        constexpr double HEAVY_BEHIND_MEDIUM = 5.0;
+        constexpr double HEAVY_BEHIND_HEAVY = 4.0;
+
+        constexpr double MEDIUM_BEHIND_LIGHT = 4.0;
+        constexpr double MEDIUM_BEHIND_MEDIUM = 3.0;
+        constexpr double MEDIUM_BEHIND_HEAVY = 5.0;
+
+        constexpr double LIGHT_BEHIND_ANY = 3.0;
+
+        // Departure behind arrival (departure on runway, arrival on final)
+        // Leader (arrival) Heavy/Super, follower (departure) Light: 6 NM
+        // Leader Heavy/Super, follower Medium/Heavy: 5 NM
+        // Leader Medium, follower Light: 4 NM
+        // Otherwise: 3 NM
+
+        // Departure behind departure
+        // Heavy departure followed by Light departure: 2 minutes (ICAO)
+        // Heavy/Super followed by non-Light: 2 minutes
+        // Otherwise: 1 minute
+
+        constexpr double HELICOPTER_SPACING = 1.5; // NM between any aircraft and helicopter
+
+        // Time-based separation in seconds (assuming 145 kt approach speed ≈ 0.04 NM/s)
+        // These are approximate; actual values depend on approach speed
+        inline int nmToSeconds(double nm, double speedKt = 145.0)
+        {
+            return (int)(nm * 3600.0 / speedKt + 0.999);
+        }
+    }
+
     class SimpleRunwayMutex
     {
     public:
@@ -1033,43 +1087,54 @@ namespace ai
             return (profile.category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter;
         }
 
-        int getWakeWeight(shared_ptr<Flight> flight) const
+        /// Maps a flight's performance profile to a WakeTurbulenceCategory enum.
+        /// Uses ICAO Doc 4444 wake turbulence codes when available, falling back
+        /// to aircraft category when the WTC string is empty.
+        WakeTurbulenceCategory getWakeCategory(shared_ptr<Flight> flight) const
         {
             const auto& profile = getPerformanceProfile(flight);
             if (!profile.wakeTurbulenceCategory.empty())
             {
                 const char wakeCode = (char)toupper((unsigned char)profile.wakeTurbulenceCategory[0]);
-                if (wakeCode == 'J' || wakeCode == 'S')
+                switch (wakeCode)
                 {
-                    return 5;
-                }
-                if (wakeCode == 'H')
-                {
-                    return 4;
-                }
-                if (wakeCode == 'M')
-                {
-                    return 3;
-                }
-                if (wakeCode == 'L')
-                {
-                    return 2;
+                    case 'L': return WakeTurbulenceCategory::Light;
+                    case 'M': return WakeTurbulenceCategory::Medium;
+                    case 'H':
+                        if ((profile.category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter)
+                            return WakeTurbulenceCategory::Helicopter;
+                        return WakeTurbulenceCategory::Heavy;
+                    case 'J':
+                    case 'S': return WakeTurbulenceCategory::Super;
                 }
             }
 
             if ((profile.category & Aircraft::Category::Heavy) == Aircraft::Category::Heavy)
-            {
-                return 4;
-            }
+                return WakeTurbulenceCategory::Heavy;
+            if ((profile.category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter)
+                return WakeTurbulenceCategory::Helicopter;
             if (
                 (profile.category & Aircraft::Category::LightProp) == Aircraft::Category::LightProp ||
-                (profile.category & Aircraft::Category::Prop) == Aircraft::Category::Prop ||
-                (profile.category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter)
-            {
-                return 2;
-            }
+                (profile.category & Aircraft::Category::Prop) == Aircraft::Category::Prop)
+                return WakeTurbulenceCategory::Light;
 
-            return 3;
+            return WakeTurbulenceCategory::Medium;
+        }
+
+        /// Returns a numeric weight for wake turbulence category ordering (kept
+        /// for backward compatibility with existing separation calculations).
+        int getWakeWeight(shared_ptr<Flight> flight) const
+        {
+            const auto category = getWakeCategory(flight);
+            switch (category)
+            {
+                case WakeTurbulenceCategory::Super:      return 5;
+                case WakeTurbulenceCategory::Heavy:      return 4;
+                case WakeTurbulenceCategory::Medium:     return 3;
+                case WakeTurbulenceCategory::Light:      return 2;
+                case WakeTurbulenceCategory::Helicopter: return 2;
+                default:                                 return 3;
+            }
         }
 
         float getRequiredArrivalSpacingMiles(
@@ -1187,18 +1252,24 @@ namespace ai
 
         float getSecondsToTouchdown(shared_ptr<FlightStrip> strip)
         {
-            Altitude altitude = strip->flight->aircraft()->altitude();
-            float verticalSpeedFpm = strip->flight->aircraft()->verticalSpeedFpm();
-            if (abs(verticalSpeedFpm) < 0.001)
+            auto aircraft = strip->flight->aircraft();
+            if (aircraft->altitude().isGround())
             {
-                return m_timing.RWY_TIME_INFINITY;
+                return 0.0f;
             }
-            float feetAgl = altitude.isGroundBased()
-                ? altitude.feet()
-                : altitude.feet() - m_activeRunwayEnd.elevationFeet();
 
-            float result = min(feetAgl * 60 / abs(verticalSpeedFpm), (float)m_timing.RWY_TIME_INFINITY);
-            return abs(result) < 0.001 ? m_timing.RWY_TIME_INFINITY : result;
+            double groundSpeedKt = aircraft->groundSpeedKt();
+            if (groundSpeedKt < 1.0)
+            {
+                return (float)m_timing.RW_TIME_INFINITY;
+            }
+
+            double distanceMeters = GeoMath::getDistanceMeters(
+                aircraft->location(),
+                m_activeRunwayEnd.centerlinePoint().geo());
+
+            double secondsToTouchdown = distanceMeters / (groundSpeedKt * METERS_IN_1_NAUTICAL_MILE / 3600.0);
+            return min((float)secondsToTouchdown, (float)m_timing.RW_TIME_INFINITY);
         }
 
         float getMilesOnFinal(shared_ptr<FlightStrip> subject)

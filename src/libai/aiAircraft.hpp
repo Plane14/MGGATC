@@ -34,7 +34,7 @@ namespace ai
     {
     private:
         GeoPoint m_location;
-        chrono::microseconds m_locationTimespamp;
+        chrono::microseconds m_locationTimestamp;
         chrono::microseconds m_touchdownTimestamp;
         AircraftAttitude m_attitude;
         Altitude m_altitude;
@@ -72,7 +72,7 @@ namespace ai
             m_gearState(1.0f),
             m_flapState(0),
             m_spoilerState(0),
-            m_locationTimespamp(chrono::seconds(-1)),
+            m_locationTimestamp(chrono::seconds(-1)),
             m_touchdownTimestamp(chrono::seconds(-1)),
             m_altitude(Altitude::ground()),
             m_lights(LightBits::None)
@@ -80,7 +80,7 @@ namespace ai
         }
 
         const GeoPoint& location() const override { return m_location; }
-        chrono::microseconds locationTiemstamp() const { return m_locationTimespamp; }
+        chrono::microseconds locationTimestamp() const { return m_locationTimestamp; }
         const AircraftAttitude& attitude() const override { return m_attitude; }
         double track() const override { return m_track; }
         const Altitude& altitude() const override { return m_altitude; }
@@ -99,7 +99,9 @@ namespace ai
 
         void park(shared_ptr<ParkingStand> parkingStand) override
         {
-            m_location = GeoMath::getPointAtDistance(parkingStand->location().geo(), GeoMath::flipHeading(parkingStand->heading()), 13);
+            const auto& profile = host()->services().get<AircraftPerformanceProfileService>()->resolve(modelIcao());
+            double parkingOffsetMeters = profile.lengthMeters / 2.0 + 5.0;
+            m_location = GeoMath::getPointAtDistance(parkingStand->location().geo(), GeoMath::flipHeading(parkingStand->heading()), parkingOffsetMeters);
             m_attitude = AircraftAttitude({ parkingStand->heading(), 0, 0 });
             m_altitude = Altitude::ground();
             m_groundSpeedKt = 0;
@@ -117,7 +119,7 @@ namespace ai
 
             if (traffic_pattern::shouldUseAdvisoryPattern(arrivalAirport, flightPtr))
             {
-                const auto geometry = traffic_pattern::buildLeftPattern(profile, runwayEnd, category());
+                const auto geometry = traffic_pattern::buildPatternForRunway(profile, runwayEnd, category());
 
                 setAltitude(Altitude::msl(runwayEnd.elevationFeet() + geometry.patternAltitudeFeetAgl));
                 setGroundSpeedKt(geometry.downwindSpeedKt);
@@ -127,7 +129,7 @@ namespace ai
                 setLights(LightBits::BeaconLandingNavStrobe);
                 setAttitude(AircraftAttitude(geometry.downwindHeading, 0.0f, 0.0f));
 
-                m_locationTimespamp = host()->getWorld()->timestamp();
+                m_locationTimestamp = host()->getWorld()->timestamp();
                 setLocation(geometry.downwindEntry);
                 setManeuver(flightPtr->pilot()->getFinalToGate(runwayEnd));
                 return;
@@ -148,7 +150,7 @@ namespace ai
             setLights(LightBits::BeaconLandingNavStrobe);
             setAttitude(AircraftAttitude(runwayEnd.heading(), -2.0f, 0));
 
-            m_locationTimespamp = host()->getWorld()->timestamp();
+            m_locationTimestamp = host()->getWorld()->timestamp();
 
             float finalDistance = minutesToThreshold * groundSpeedKt / 60;
             auto aimingPoint = runwayEnd.centerlinePoint().geo();
@@ -181,11 +183,11 @@ namespace ai
             }
 
             bool touchedDown = false;
-            int64_t elapsedMicroseconds = (timestamp - m_locationTimespamp).count();
+            int64_t elapsedMicroseconds = (timestamp - m_locationTimestamp).count();
 
             moveFor(elapsedMicroseconds, touchedDown);
 
-            m_locationTimespamp = timestamp;
+            m_locationTimestamp = timestamp;
             if (touchedDown)
             {
                 m_touchdownTimestamp = timestamp;

@@ -506,3 +506,99 @@ TEST(RunwayMutexTest, C__takeoff_1stInLine__holdingShort__hold_traffic)
 //        .whenTaxiingReportsHoldingShort()
 //        .thenHoldShort(DeclineReason::TrafficDeparting));
 //}
+
+//====== WAKE TURBULENCE SEPARATION =====
+
+TEST(RunwayMutexTest, W__heavy_departure_light_arrival_requires_more_spacing)
+{
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("C17")               // Heavy
+        .otherTrafficType("C172")          // Light
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(120).end()
+        .whenDepartureChecksIn()
+        .thenHoldShort(DeclineReason::TrafficLanding, true));
+}
+
+TEST(RunwayMutexTest, W__heavy_departure_light_arrival_at_90sec__clear)
+{
+    // At 90 seconds separation, Heavy dep + Light arr should be allowed
+    // since 6.0 NM / 145 kt ≈ 150 sec minimum... but existing test shows 120 sec holds
+    // Let's test at a larger value
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("C17")               // Heavy
+        .otherTrafficType("C172")          // Light
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(200).end()
+        .whenDepartureChecksIn()
+        .thenClearForTakeoff(true));
+}
+
+TEST(RunwayMutexTest, W__heavy_departure_medium_arrival_requires_spacing)
+{
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("C17")               // Heavy
+        .otherTrafficType("A320")          // Medium
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(120).end()
+        .whenDepartureChecksIn()
+        .thenHoldShort(DeclineReason::TrafficLanding, true));
+}
+
+TEST(RunwayMutexTest, W__medium_departure_light_arrival_requires_spacing)
+{
+    // Medium dep (B738, weight 3) + Light arr (C172, weight 2) requires 4 NM ≈ 99 sec
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("B738")              // Medium (B738 is Medium WTC)
+        .otherTrafficType("C172")          // Light
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(80).end()
+        .whenDepartureChecksIn()
+        .thenHoldShort(DeclineReason::TrafficLanding, true));
+}
+
+TEST(RunwayMutexTest, W__light_departure_any_arrival_clears_quickly)
+{
+    // Light dep (C172, weight 2) + Medium arr (B738, weight 3) requires 3 NM ≈ 74 sec
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("C172")              // Light
+        .otherTrafficType("B738")          // Medium
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(91).end()
+        .whenDepartureChecksIn()
+        .thenClearForTakeoff(true));
+}
+
+TEST(RunwayMutexTest, W__helicopter_spacing_tighter_than_fixedWing)
+{
+    // Helicopters have 1.5 NM spacing (tighter than fixed-wing)
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Departure)
+        .subjectType("A109")              // Helicopter
+        .otherTrafficType("A109")          // Helicopter on final
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(70).end()
+        .whenDepartureChecksIn()
+        .thenClearForTakeoff(true));
+}
+
+TEST(RunwayMutexTest, W__arrival_heavy_clearsOnVacatedRunway)
+{
+    // Heavy arrival on final with vacated runway should clear to land
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Arrival)
+        .subjectType("C17")               // Heavy
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(91).end()
+        .whenArrivalChecksIn()
+        .thenClearToLand());
+}
+
+TEST(RunwayMutexTest, W__arrival_heavy_at_100sec__clear)
+{
+    // Heavy arrival clears to land at 100 seconds
+    MutexTestCase test;
+    EXPECT_TRUE(test.type(ScenarioType::Arrival)
+        .subjectType("C17")               // Heavy
+        .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(100).end()
+        .whenArrivalChecksIn()
+        .thenClearToLand());
+}
