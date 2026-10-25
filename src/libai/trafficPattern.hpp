@@ -44,10 +44,25 @@ namespace ai
                 flight->rules() != Flight::RulesType::IFR);
         }
 
-        inline Geometry buildLeftPattern(
+        enum class PatternDirection
+        {
+            Left,
+            Right
+        };
+
+        inline PatternDirection getPatternDirection(const Runway::End& runwayEnd)
+        {
+            // Default to left-hand pattern per ICAO standard.
+            // Right-hand patterns are published in AIP / WED for specific runways.
+            // TODO: read pattern direction from airport/nav data when available.
+            return PatternDirection::Left;
+        }
+
+        inline Geometry buildPattern(
             const AircraftPerformanceProfileService::Profile& profile,
             const Runway::End& runwayEnd,
-            Aircraft::Category category)
+            Aircraft::Category category,
+            PatternDirection direction)
         {
             const bool helicopter =
                 (category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter;
@@ -84,15 +99,16 @@ namespace ai
             const GeoPoint threshold = runwayEnd.centerlinePoint().geo();
             const float finalHeading = runwayEnd.heading();
             const float downwindHeading = GeoMath::flipHeading(finalHeading);
-            const float baseHeading = GeoMath::addTurnToHeading(downwindHeading, -90.0f);
-            const float leftOffsetHeading = GeoMath::addTurnToHeading(finalHeading, -90.0f);
+            const float turnDegrees = (direction == PatternDirection::Left) ? -90.0f : 90.0f;
+            const float baseHeading = GeoMath::addTurnToHeading(downwindHeading, turnDegrees);
+            const float offsetHeading = GeoMath::addTurnToHeading(finalHeading, turnDegrees);
             const GeoPoint finalStart = GeoMath::getPointAtDistance(
                 threshold,
                 GeoMath::flipHeading(finalHeading),
                 finalDistanceMeters);
             const GeoPoint baseTurn = GeoMath::getPointAtDistance(
                 finalStart,
-                leftOffsetHeading,
+                offsetHeading,
                 lateralOffsetNm * (float)METERS_IN_1_NAUTICAL_MILE);
             const GeoPoint downwindEntry = GeoMath::getPointAtDistance(
                 baseTurn,
@@ -121,6 +137,30 @@ namespace ai
             geometry.baseDuration = durationForLeg(baseTurn, finalStart, baseSpeedKt);
 
             return geometry;
+        }
+
+        inline Geometry buildLeftPattern(
+            const AircraftPerformanceProfileService::Profile& profile,
+            const Runway::End& runwayEnd,
+            Aircraft::Category category)
+        {
+            return buildPattern(profile, runwayEnd, category, PatternDirection::Left);
+        }
+
+        inline Geometry buildRightPattern(
+            const AircraftPerformanceProfileService::Profile& profile,
+            const Runway::End& runwayEnd,
+            Aircraft::Category category)
+        {
+            return buildPattern(profile, runwayEnd, category, PatternDirection::Right);
+        }
+
+        inline Geometry buildPatternForRunway(
+            const AircraftPerformanceProfileService::Profile& profile,
+            const Runway::End& runwayEnd,
+            Aircraft::Category category)
+        {
+            return buildPattern(profile, runwayEnd, category, getPatternDirection(runwayEnd));
         }
     }
 }

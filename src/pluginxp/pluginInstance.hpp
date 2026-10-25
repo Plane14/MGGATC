@@ -769,7 +769,8 @@ public:
 
         m_hostServices = createHostServices();
         transitionToState([this]() { return createWorldAssemblingState(); });
-        XPLMRegisterFlightLoopCallback(&pluginFlightLoopCallback, -1.0, this);
+        // Fixed timestep: 20 Hz (50 ms) to avoid consuming CPU every frame.
+        XPLMRegisterFlightLoopCallback(&pluginFlightLoopCallback, 0.05, this);
     }
 
     ~PluginInstance()
@@ -1033,7 +1034,8 @@ private:
             static_cast<PluginInstance*>(inRefcon)->flightLoopTick();
         }
 
-        return -1;
+        // Maintain 20 Hz fixed timestep (50 ms between calls).
+        return 0.05f;
     }
 
 };

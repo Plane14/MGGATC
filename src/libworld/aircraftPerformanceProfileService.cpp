@@ -284,6 +284,7 @@ namespace world
         {
             if ((profile.category & Aircraft::Category::Helicopter) == Aircraft::Category::Helicopter)
             {
+                profile.lengthMeters = 15;
                 profile.takeOffV2Kt = 60;
                 profile.takeOffDistanceMeters = 300;
                 profile.initialClimbIASKt = 70;
@@ -311,6 +312,7 @@ namespace world
             if ((profile.category & Aircraft::Category::Jet) == Aircraft::Category::Jet &&
                 (profile.category & Aircraft::Category::Heavy) == Aircraft::Category::Heavy)
             {
+                profile.lengthMeters = 60;
                 profile.takeOffV2Kt = 165;
                 profile.takeOffDistanceMeters = 2600;
                 profile.initialClimbIASKt = 175;
@@ -339,6 +341,7 @@ namespace world
 
             if ((profile.category & Aircraft::Category::Jet) == Aircraft::Category::Jet)
             {
+                profile.lengthMeters = 35;
                 profile.takeOffV2Kt = 145;
                 profile.takeOffDistanceMeters = 2200;
                 profile.initialClimbIASKt = 165;
@@ -367,6 +370,7 @@ namespace world
 
             if ((profile.category & Aircraft::Category::Turboprop) == Aircraft::Category::Turboprop)
             {
+                profile.lengthMeters = 30;
                 profile.takeOffV2Kt = 120;
                 profile.takeOffDistanceMeters = 1300;
                 profile.initialClimbIASKt = 140;
@@ -393,6 +397,7 @@ namespace world
                 return;
             }
 
+            profile.lengthMeters = 12;
             profile.takeOffV2Kt = 75;
             profile.takeOffDistanceMeters = 600;
             profile.initialClimbIASKt = 90;
