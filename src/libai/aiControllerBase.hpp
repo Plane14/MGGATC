@@ -109,7 +109,12 @@ namespace ai
             {
             case PilotIfrClearanceRequestIntent::IntentCode:
                 {
-                    int squawk = (m_nextSquawk++) % 4000 + 999;
+                    // transponder codes are 4 octal digits (0000-7777): emit only digits 0-7
+                    int squawkValue = m_nextSquawk++ % 4096;
+                    int squawk = ((squawkValue >> 9) & 7) * 1000
+                        + ((squawkValue >> 6) & 7) * 100
+                        + ((squawkValue >> 3) & 7) * 10
+                        + (squawkValue & 7);
                     reply = m_intentFactory->deliveryIfrClearanceReply(
                         intent->subjectFlight(),
                          m_clearanceFactory->ifrClearance(intent->subjectFlight(), squawk),
