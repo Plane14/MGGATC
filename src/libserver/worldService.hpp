@@ -107,6 +107,7 @@ namespace server
                 const auto fault = replyEnvelope.mutable_fault_not_found();
                 fault->set_message("Airport not found");
                 m_host->writeLog("SRVSVC|queryTaxiPath > reply FAULT APT NOT FOUND (error: %s)", e.what());
+                return;
             }
 
             const auto fromNode = airport->taxiNet()->findClosestNode(fromPoint, hasTaxiEdges);
@@ -119,7 +120,17 @@ namespace server
                 return;
             }
 
-            const auto taxiPath = TaxiPath::find(airport->taxiNet(), fromNode, toNode);
+            shared_ptr<TaxiPath> taxiPath;
+            try
+            {
+                taxiPath = TaxiPath::find(airport->taxiNet(), fromNode, toNode);
+            }
+            catch (const exception& e)
+            {
+                m_host->writeLog("SRVSVC|queryTaxiPath > reply FAULT PATH NOT FOUND (error: %s)", e.what());
+                replyEnvelope.mutable_fault_not_found()->set_message("Taxi path does not exist");
+                return;
+            }
             if (!taxiPath)
             {
                 m_host->writeLog("SRVSVC|queryTaxiPath > reply FAULT PATH NOT FOUND");
