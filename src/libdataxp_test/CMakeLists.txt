@@ -12,10 +12,11 @@ add_executable(libdataxp_test
     airportOpsTest.cpp
     xpFmsxReaderTest.cpp
     hydrationTest.cpp
+    runtimeScheduleSupportTest.cpp
 )
 
 set_property(TARGET libdataxp_test PROPERTY CXX_STANDARD 14)
-target_include_directories(libdataxp_test PUBLIC ../libworld ../libdataxp ../libworld_test)
+target_include_directories(libdataxp_test PUBLIC ../libworld ../libdataxp ../libworld_test ../pluginxp)
 target_link_libraries(libdataxp_test libdataxp libworld GTest::GTest GTest::Main)
 
 if (ATCBUILD_CAN_RUN_TESTS)

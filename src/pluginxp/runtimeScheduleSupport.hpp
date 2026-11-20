@@ -102,6 +102,11 @@ namespace runtime_schedule
         {
         }
 
+        explicit JsonValue(const char *value) :
+            JsonValue(string(value))
+        {
+        }
+
         explicit JsonValue(const string& value) :
             m_type(Type::String),
             m_boolValue(false),
