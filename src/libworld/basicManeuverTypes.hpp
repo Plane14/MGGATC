@@ -153,7 +153,7 @@ namespace world
     private:
         T m_startValue;
         T m_endValue;
-        T m_lastValue;
+        T m_lastValue = {};
         chrono::microseconds m_duration;
         FormulaFunction m_formula;
         ApplyFunction m_apply;
