@@ -13,6 +13,13 @@ using namespace ai;
 
 shared_ptr<Airport> createAirportEFGH(shared_ptr<TestHostServices> host);
 
+// EXPECT_NEAR does not handle heading wrap-around (359.9 vs 0.0):
+// compare signed turn difference instead
+static void expectHeadingNear(float expected, float actual, float tolerance)
+{
+    EXPECT_NEAR(0.0f, GeoMath::getTurnDegrees(expected, actual), tolerance);
+}
+
 TEST(TrafficPatternTest, buildLeftPattern_createsLeftDownwindGeometry)
 {
     auto host = TestHostServices::createWithWorldAirports({ createAirportEFGH });
@@ -46,7 +53,7 @@ TEST(TrafficPatternTest, buildRightPattern_createsRightDownwindGeometry)
     // Right pattern: downwind heading should be the same (opposite of final)
     EXPECT_NEAR(270.0f, geometry.downwindHeading, 0.2f);
     // Base heading: right turn from downwind = +90 degrees => 0 (north)
-    EXPECT_NEAR(0.0f, geometry.baseHeading, 0.2f);
+    expectHeadingNear(0.0f, geometry.baseHeading, 0.2f);
     // Final heading unchanged
     EXPECT_NEAR(90.0f, geometry.finalHeading, 0.2f);
     EXPECT_GE(geometry.patternAltitudeFeetAgl, 1000.0f);
@@ -69,7 +76,7 @@ TEST(TrafficPatternTest, buildPattern_delegatesToCorrectDirection)
     // Right pattern should have base heading at 0 (north)
     auto rightGeometry = traffic_pattern::buildPattern(
         profile, runwayEnd, profile.category, traffic_pattern::PatternDirection::Right);
-    EXPECT_NEAR(0.0f, rightGeometry.baseHeading, 0.2f);
+    expectHeadingNear(0.0f, rightGeometry.baseHeading, 0.2f);
 }
 
 TEST(TrafficPatternTest, buildPatternForRunway_defaultsToLeft)

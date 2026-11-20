@@ -66,7 +66,7 @@ private:
                 continue;
             }
 
-            float baseFeetAgl = std::max(0.0f, baseMetersMsl * FEET_IN_1_METER - airport.header().elevation());
+            float baseFeetAgl = std::max(0.0f, baseMetersMsl * (float)FEET_IN_1_METER - airport.header().elevation());
             if (!foundCeiling || baseFeetAgl < lowestCeilingFeet)
             {
                 lowestCeilingFeet = baseFeetAgl;

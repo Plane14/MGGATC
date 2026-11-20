@@ -522,16 +522,15 @@ TEST(RunwayMutexTest, W__heavy_departure_light_arrival_requires_more_spacing)
 
 TEST(RunwayMutexTest, W__heavy_departure_light_arrival_at_90sec__clear)
 {
-    // At 90 seconds separation, Heavy dep + Light arr should be allowed
-    // since 6.0 NM / 145 kt ≈ 150 sec minimum... but existing test shows 120 sec holds
-    // Let's test at a larger value
+    // Heavy dep + Light arr at 200 sec is past the required ~150 sec
+    // (6 NM) wake spacing, so the departure clears - with traffic advisory
     MutexTestCase test;
     EXPECT_TRUE(test.type(ScenarioType::Departure)
         .subjectType("C17")               // Heavy
         .otherTrafficType("C172")          // Light
         .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(200).end()
         .whenDepartureChecksIn()
-        .thenClearForTakeoff(true));
+        .thenClearForTakeoffAndTraffic(false, TrafficAdvisory::onFinal("C172", 8)));
 }
 
 TEST(RunwayMutexTest, W__heavy_departure_medium_arrival_requires_spacing)
@@ -559,14 +558,16 @@ TEST(RunwayMutexTest, W__medium_departure_light_arrival_requires_spacing)
 
 TEST(RunwayMutexTest, W__light_departure_any_arrival_clears_quickly)
 {
-    // Light dep (C172, weight 2) + Medium arr (B738, weight 3) requires 3 NM ≈ 74 sec
+    // Light dep (C172, weight 2) + Medium arr (B738, weight 3) requires 3 NM ≈ 74 sec,
+    // but the 90 sec takeoff-before-landing minimum applies - at 91 sec it clears,
+    // immediately and with a traffic advisory on the arrival
     MutexTestCase test;
     EXPECT_TRUE(test.type(ScenarioType::Departure)
         .subjectType("C172")              // Light
         .otherTrafficType("B738")          // Medium
         .given(RunwaySituation::Vacated).checkedIn(false).clearedToLand(false).numberInLine(1).secsToTouchdown(91).end()
         .whenDepartureChecksIn()
-        .thenClearForTakeoff(true));
+        .thenClearForTakeoffAndTraffic(true, TrafficAdvisory::onFinal("B738", 3)));
 }
 
 TEST(RunwayMutexTest, W__helicopter_spacing_tighter_than_fixedWing)

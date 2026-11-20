@@ -415,7 +415,10 @@ namespace ai
                 const int vacatedBeforeLandingMinSeconds = numberOneForLanding
                     ? getVacatedBeforeLandingMinSeconds(numberOneForLanding)
                     : m_timing.RWY_TIME_VACATED_BEFORE_LANDING_MIN;
-                if (secondsToTouchdown < vacatedBeforeLandingMinSeconds && !safe)
+                // An aircraft that has already touched down cannot go around;
+                // its rollout is handled by the runway-vacation detection above.
+                const bool alreadyOnGround = numberOneForLanding->flight->aircraft()->altitude().isGround();
+                if (secondsToTouchdown < vacatedBeforeLandingMinSeconds && !safe && !alreadyOnGround)
                 {
                     if (reason == DeclineReason::None)
                     {
@@ -445,6 +448,12 @@ namespace ai
                 while (!m_board.arrivalsLine.empty())
                 {
                     auto arrival = m_board.arrivalsLine.at(0);
+                    if (arrival->flight->aircraft()->altitude().isGround())
+                    {
+                        // landed aircraft cannot go around - drop the stale strip
+                        m_board.arrivalsLine.erase(m_board.arrivalsLine.begin());
+                        continue;
+                    }
                     secondsToTouchdown = getSecondsToTouchdown(arrival);
                     if (secondsToTouchdown > getVacatedBeforeLandingMinSeconds(arrival))
                     {
@@ -1261,7 +1270,7 @@ namespace ai
             double groundSpeedKt = aircraft->groundSpeedKt();
             if (groundSpeedKt < 1.0)
             {
-                return (float)m_timing.RW_TIME_INFINITY;
+                return (float)m_timing.RWY_TIME_INFINITY;
             }
 
             double distanceMeters = GeoMath::getDistanceMeters(
@@ -1269,7 +1278,7 @@ namespace ai
                 m_activeRunwayEnd.centerlinePoint().geo());
 
             double secondsToTouchdown = distanceMeters / (groundSpeedKt * METERS_IN_1_NAUTICAL_MILE / 3600.0);
-            return min((float)secondsToTouchdown, (float)m_timing.RW_TIME_INFINITY);
+            return min((float)secondsToTouchdown, (float)m_timing.RWY_TIME_INFINITY);
         }
 
         float getMilesOnFinal(shared_ptr<FlightStrip> subject)
