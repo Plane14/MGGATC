@@ -12,6 +12,7 @@ endif()
 
 add_executable(libserver_test
     e2eTest.cpp
+    worldServiceTest.cpp
     testClient.hpp
 )
 

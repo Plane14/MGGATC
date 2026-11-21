@@ -44,7 +44,7 @@ namespace ai
                 34000,
                 5,
                 0, //why DEP??
-                to_string(squawk)
+                formatSquawk(squawk)
             ));
         }
 
@@ -279,6 +279,13 @@ namespace ai
         }
 
     private:
+        static string formatSquawk(int squawk)
+        {
+            char buffer[8];
+            snprintf(buffer, sizeof(buffer), "%04d", squawk);
+            return buffer;
+        }
+
         void initClearanceHeader(
             Clearance::Header& header, 
             Clearance::Type type,

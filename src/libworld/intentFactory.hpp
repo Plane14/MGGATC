@@ -536,8 +536,8 @@ namespace world
             return shared_ptr<Intent>(new GroundArrivalTaxiReplyIntent(
                 m_nextIntentId++,
                 replyToId,
-                clearance->header().issuedBy,
-                clearance->header().issuedTo,
+                clearance ? clearance->header().issuedBy : nullptr,
+                clearance ? clearance->header().issuedTo : nullptr,
                 !!clearance,
                 clearance
             ));

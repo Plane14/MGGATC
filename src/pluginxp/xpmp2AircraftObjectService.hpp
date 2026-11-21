@@ -128,6 +128,11 @@ public:
         m_onQueryChanges = callback;
     }
 
+    shared_ptr<Flight> flight() const
+    {
+        return m_flight;
+    }
+
 private:
 
     void safeUpdatePosition()
@@ -341,6 +346,25 @@ public:
             });
 
             m_simAircraft.push_back(newSimAircraft);
+        }
+
+        for (const auto& removedFlight : m_lastChangeSet->flights().removed())
+        {
+            if (removedFlight->aircraft()->nature() != world::Actor::Nature::AI)
+            {
+                continue;
+            }
+
+            auto it = std::find_if(
+                m_simAircraft.begin(), m_simAircraft.end(),
+                [&](const shared_ptr<Xpmp2AircraftObject>& simAircraft) {
+                    return simAircraft->flight() == removedFlight;
+                });
+
+            if (it != m_simAircraft.end())
+            {
+                m_simAircraft.erase(it);
+            }
         }
     }
 

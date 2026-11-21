@@ -183,7 +183,9 @@ namespace ai
             }
 
             bool touchedDown = false;
-            int64_t elapsedMicroseconds = (timestamp - m_locationTimestamp).count();
+            int64_t elapsedMicroseconds = m_locationTimestamp.count() >= 0
+                ? (timestamp - m_locationTimestamp).count()
+                : 0;
 
             moveFor(elapsedMicroseconds, touchedDown);
 

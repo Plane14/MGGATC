@@ -24,6 +24,7 @@ namespace world
         m_flightNo(_flightNo),
         m_callSign(_callSign),
         m_plan(_plan),
+        m_phase(Phase::NotAssigned),
         m_onChanges(World::onChangesUnassigned),
         m_landingRunwayElevationFeet(ALTITUDE_UNASSIGNED - 1) //TODO: std::optional - does MinGW already support C++17?
     {

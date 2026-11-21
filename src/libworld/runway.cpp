@@ -13,7 +13,8 @@ namespace world
         m_end1(_end1),
         m_end2(_end2),
         m_widthMeters(_widthMeters),
-        m_lengthMeters(TaxiEdge::calculateTaxiDistance(_end1.centerlinePoint(), _end2.centerlinePoint()))
+        m_lengthMeters(TaxiEdge::calculateTaxiDistance(_end1.centerlinePoint(), _end2.centerlinePoint())),
+        m_maskBit(0)
     {
     }
 

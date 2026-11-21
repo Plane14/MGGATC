@@ -9,8 +9,8 @@ public:
     static void toMessage(shared_ptr<world::Airport> airport, world_proto::Airport& message)
     {
         message.set_icao(airport->header().icao());
-        message.mutable_location()->set_lat(30);
-        message.mutable_location()->set_lon(-73);
+        message.mutable_location()->set_lat(airport->header().datum().latitude);
+        message.mutable_location()->set_lon(airport->header().datum().longitude);
 
         for (const auto& runway : airport->runways())
         {
